@@ -1,0 +1,22 @@
+{
+  "name": "D' Cora Nails Studio",
+  "short_name": "Cora Nails",
+  "description": "Uñas y belleza - Tu espacio de cuidado personal",
+  "start_url": "/dcora-nails-studio/",
+  "scope": "/dcora-nails-studio/",
+  "display": "standalone",
+  "background_color": "#ec4899",
+  "theme_color": "#ec4899",
+  "icons": [
+    {
+      "src": "/dcora-nails-studio/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/dcora-nails-studio/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
