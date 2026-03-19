@@ -1,22 +1,22 @@
-// sw.js - Service Worker para D' Cora Nails Studio
+// sw.js - Service Worker para Nails Gretel
 
-const CACHE_NAME = 'dcora-nails-studio-v1';
+const CACHE_NAME = 'nails-gretel-v1';
 const urlsToCache = [
-  '/dcora-nails-studio/',
-  '/dcora-nails-studio/index.html',
-  '/dcora-nails-studio/admin.html',
-  '/dcora-nails-studio/admin-login.html',
-  '/dcora-nails-studio/setup-wizard.html',
-  '/dcora-nails-studio/editar-negocio.html',
-  '/dcora-nails-studio/manifest.json',
-  '/dcora-nails-studio/icons/icon-72x72.png',
-  '/dcora-nails-studio/icons/icon-96x96.png',
-  '/dcora-nails-studio/icons/icon-128x128.png',
-  '/dcora-nails-studio/icons/icon-144x144.png',
-  '/dcora-nails-studio/icons/icon-152x152.png',
-  '/dcora-nails-studio/icons/icon-192x192.png',
-  '/dcora-nails-studio/icons/icon-384x384.png',
-  '/dcora-nails-studio/icons/icon-512x512.png'
+  '/nails-gretel/',
+  '/nails-gretel/index.html',
+  '/nails-gretel/admin.html',
+  '/nails-gretel/admin-login.html',
+  '/nails-gretel/setup-wizard.html',
+  '/nails-gretel/editar-negocio.html',
+  '/nails-gretel/manifest.json',
+  '/nails-gretel/icons/icon-72x72.png',
+  '/nails-gretel/icons/icon-96x96.png',
+  '/nails-gretel/icons/icon-128x128.png',
+  '/nails-gretel/icons/icon-144x144.png',
+  '/nails-gretel/icons/icon-152x152.png',
+  '/nails-gretel/icons/icon-192x192.png',
+  '/nails-gretel/icons/icon-384x384.png',
+  '/nails-gretel/icons/icon-512x512.png'
 ];
 
 // ============================================
@@ -108,7 +108,7 @@ self.addEventListener('fetch', event => {
           }
           // Si no hay cache y es imagen, devolver icon por defecto
           if (event.request.url.match(/\.(jpg|jpeg|png|gif|svg|webp)$/)) {
-            return caches.match('/dcora-nails-studio/icons/icon-192x192.png');
+            return caches.match('/nails-gretel/icons/icon-192x192.png');
           }
           return new Response('Error de red', { status: 408 });
         });
@@ -138,6 +138,6 @@ self.addEventListener('message', event => {
   }
 });
 
-console.log('✅ Service Worker configurado para D\' Cora Nails Studio');
+console.log('✅ Service Worker configurado para Nails Gretel');
 console.log('📦 Cache:', CACHE_NAME);
 console.log('📄 Archivos a cachear:', urlsToCache.length);
