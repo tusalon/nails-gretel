@@ -368,7 +368,7 @@ function Calendar({ onDateSelect, selectedDate, profesional, service }) {
                             } else if (diaLibreProfesional) {
                                 title = `✈️ ${profesional?.nombre} no trabaja este día (día libre/vacaciones)`;
                             } else if (completamenteOcupado) {
-                                title = "🈵 Todos los horarios están ocupados";
+                                title = "📅❌ Todos los horarios están ocupados";
                             } else if (past && dateStr === getTodayLocalString()) {
                                 title = "Hoy ya no hay horarios disponibles";
                             } else if (past) {
@@ -399,7 +399,7 @@ function Calendar({ onDateSelect, selectedDate, profesional, service }) {
                                         <span className="absolute top-0 right-0 text-[10px] text-orange-500">✈️</span>
                                     )}
                                     {completamenteOcupado && !cerrado && !diaLibreProfesional && (
-                                        <span className="absolute top-0 right-0 text-[10px] text-red-500">🈵</span>
+                                        <span className="absolute top-0 right-0 text-[10px] text-red-500">📅❌</span>
                                     )}
                                     {available && !selected && !cerrado && !diaLibreProfesional && !completamenteOcupado && (
                                         <span className="absolute bottom-0.5 left-1/2 transform -translate-x-1/2 w-1 h-1 bg-pink-400 rounded-full"></span>
@@ -442,7 +442,7 @@ function Calendar({ onDateSelect, selectedDate, profesional, service }) {
                     )}
                     {fechasCompletamenteOcupadas.length > 0 && (
                         <div className="flex items-center gap-2 mt-2">
-                            <span className="text-red-500 text-lg">🈵</span>
+                            <span className="text-red-500 text-lg">📅❌</span>
                             <span>
                                 <strong>Días sin horarios disponibles:</strong>{' '}
                                 {fechasCompletamenteOcupadas.length} día(s) completamente ocupado(s)
