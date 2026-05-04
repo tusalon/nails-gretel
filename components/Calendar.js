@@ -1,6 +1,6 @@
 // components/Calendar.js - VERSIÓN CON VERIFICACIÓN DE DISPONIBILIDAD REAL
 
-function Calendar({ onDateSelect, selectedDate, profesional, service }) {
+function Calendar({ onDateSelect, selectedDate, profesional, service, onHorariosCargados }) {
     const [currentDate, setCurrentDate] = React.useState(new Date());
     const [diasLaborales, setDiasLaborales] = React.useState([]);
     const [diasCerrados, setDiasCerrados] = React.useState([]);
@@ -31,6 +31,7 @@ function Calendar({ onDateSelect, selectedDate, profesional, service }) {
                 console.log(`📅 Días laborales de ${profesional.nombre}:`, horarios.dias);
                 setDiasLaborales(horarios.dias || []);
                 setHorariosPorDia(horarios.horariosPorDia || {});
+                if (onHorariosCargados) onHorariosCargados(horarios.horariosPorDia || {}); // LÍNEA NUEVA
                 
                 const diasCerradosList = await window.getDiasCerrados();
                 setDiasCerrados(diasCerradosList.map(d => d.fecha));

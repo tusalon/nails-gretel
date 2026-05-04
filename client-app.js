@@ -29,6 +29,7 @@ function ClientApp() {
     const [bookingConfirmed, setBookingConfirmed] = React.useState(null);
     const [userRol, setUserRol] = React.useState('cliente');
     const [history, setHistory] = React.useState(['auth']);
+    const [horariosPorDia, setHorariosPorDia] = React.useState({}); // NUEVO
 
     // ============================================
     // DETECTAR SESIÓN AL INICIAR Y REDIRIGIR SEGÚN ROL
@@ -250,6 +251,7 @@ function ClientApp() {
                                         selectedDate={selectedDate}
                                         profesional={selectedProfesional}
                                         service={selectedService}
+                                        onHorariosCargados={setHorariosPorDia}
                                     />
                                 </div>
                             )}
@@ -263,6 +265,7 @@ function ClientApp() {
                                         profesional={selectedProfesional}
                                         onTimeSelect={setSelectedTime}
                                         selectedTime={selectedTime}
+                                        horariosPorDia={horariosPorDia}
                                     />
                                 </div>
                             )}
