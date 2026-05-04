@@ -1,11 +1,25 @@
-// components/Calendar.js - VERSIÓN CON DÍAS CERRADOS + DÍAS LIBRES DE PROFESIONAL
+// components/Calendar.js - VERSIÓN CON VERIFICACIÓN DE DISPONIBILIDAD REAL
 
-function Calendar({ onDateSelect, selectedDate, profesional }) {
+function Calendar({ onDateSelect, selectedDate, profesional, service }) {
     const [currentDate, setCurrentDate] = React.useState(new Date());
     const [diasLaborales, setDiasLaborales] = React.useState([]);
     const [diasCerrados, setDiasCerrados] = React.useState([]);
     const [cargandoHorarios, setCargandoHorarios] = React.useState(false);
     const [fechasLibresProfesional, setFechasLibresProfesional] = React.useState([]);
+    const [horariosPorDia, setHorariosPorDia] = React.useState({});
+    const [fechasCompletamenteOcupadas, setFechasCompletamenteOcupadas] = React.useState([]);
+    const [cargandoDisponibilidad, setCargandoDisponibilidad] = React.useState(false);
+
+    const indiceToHoraLegible = (indice) => {
+        const horas = Math.floor(indice / 2);
+        const minutos = indice % 2 === 0 ? '00' : '30';
+        return `${horas.toString().padStart(2, '0')}:${minutos}`;
+    };
+
+    const timeToMinutes = (timeStr) => {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        return hours * 60 + minutes;
+    };
 
     React.useEffect(() => {
         if (!profesional) return;
@@ -16,11 +30,12 @@ function Calendar({ onDateSelect, selectedDate, profesional }) {
                 const horarios = await window.salonConfig.getHorariosProfesional(profesional.id);
                 console.log(`📅 Días laborales de ${profesional.nombre}:`, horarios.dias);
                 setDiasLaborales(horarios.dias || []);
+                setHorariosPorDia(horarios.horariosPorDia || {});
                 
                 const diasCerradosList = await window.getDiasCerrados();
                 setDiasCerrados(diasCerradosList.map(d => d.fecha));
                 
-                // 🔥 NUEVO: Cargar días libres del profesional
+                // Cargar días libres del profesional
                 if (profesional.fechas_libres) {
                     console.log(`📅 Días libres de ${profesional.nombre}:`, profesional.fechas_libres);
                     setFechasLibresProfesional(profesional.fechas_libres);
@@ -28,11 +43,15 @@ function Calendar({ onDateSelect, selectedDate, profesional }) {
                     setFechasLibresProfesional([]);
                 }
                 
+                // Verificar disponibilidad real de cada día del mes
+                await verificarDisponibilidadMes(horarios.horariosPorDia || {});
+                
             } catch (error) {
                 console.error('Error cargando disponibilidad:', error);
                 setDiasLaborales([]);
                 setDiasCerrados([]);
                 setFechasLibresProfesional([]);
+                setHorariosPorDia({});
             } finally {
                 setCargandoHorarios(false);
             }
@@ -48,6 +67,92 @@ function Calendar({ onDateSelect, selectedDate, profesional }) {
         };
         
     }, [profesional]);
+
+    React.useEffect(() => {
+        if (Object.keys(horariosPorDia).length > 0) {
+            verificarDisponibilidadMes(horariosPorDia);
+        }
+    }, [currentDate]);
+
+    const verificarDisponibilidadMes = async (horarios) => {
+        if (!service || !profesional) {
+            setFechasCompletamenteOcupadas([]);
+            return;
+        }
+
+        setCargandoDisponibilidad(true);
+        
+        try {
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+            const diasEnMes = new Date(year, month + 1, 0).getDate();
+            
+            const primerDia = new Date(year, month, 1);
+            const ultimoDia = new Date(year, month + 1, 0);
+            const fechaInicio = formatDate(primerDia);
+            const fechaFin = formatDate(ultimoDia);
+            
+            // Obtener todas las reservas del mes
+            const response = await fetch(
+                `${window.SUPABASE_URL}/rest/v1/reservas?negocio_id=eq.${window.getNegocioId()}&fecha=gte.${fechaInicio}&fecha=lte.${fechaFin}&profesional_id=eq.${profesional.id}&estado=neq.Cancelado&select=fecha,hora_inicio,hora_fin`,
+                {
+                    headers: {
+                        'apikey': window.SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${window.SUPABASE_ANON_KEY}`
+                    }
+                }
+            );
+            
+            const reservas = response.ok ? await response.json() : [];
+            
+            // Agrupar reservas por fecha
+            const reservasPorFecha = {};
+            (reservas || []).forEach(r => {
+                if (!reservasPorFecha[r.fecha]) {
+                    reservasPorFecha[r.fecha] = [];
+                }
+                reservasPorFecha[r.fecha].push(r);
+            });
+            
+            const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+            const completamenteOcupadas = [];
+            
+            // Verificar cada día del mes
+            for (let d = 1; d <= diasEnMes; d++) {
+                const fecha = new Date(year, month, d);
+                const fechaStr = formatDate(fecha);
+                const diaSemana = diasSemana[fecha.getDay()];
+                const horariosDelDia = horarios[diaSemana] || [];
+                
+                if (horariosDelDia.length === 0) continue;
+                
+                const reservasDia = reservasPorFecha[fechaStr] || [];
+                const slotsOcupados = horariosDelDia.filter(indice => {
+                    const slotStr = indiceToHoraLegible(indice);
+                    const [horas, minutos] = slotStr.split(':').map(Number);
+                    const slotStart = horas * 60 + minutos;
+                    const slotEnd = slotStart + service.duracion;
+                    
+                    return reservasDia.some(reserva => {
+                        const reservaStart = timeToMinutes(reserva.hora_inicio);
+                        const reservaEnd = timeToMinutes(reserva.hora_fin);
+                        return (slotStart < reservaEnd) && (slotEnd > reservaStart);
+                    });
+                }).length;
+                
+                if (slotsOcupados >= horariosDelDia.length) {
+                    completamenteOcupadas.push(fechaStr);
+                }
+            }
+            
+            setFechasCompletamenteOcupadas(completamenteOcupadas);
+            
+        } catch (error) {
+            console.error('Error verificando disponibilidad:', error);
+        } finally {
+            setCargandoDisponibilidad(false);
+        }
+    };
 
     const formatDate = (date) => {
         const y = date.getFullYear();
@@ -103,13 +208,24 @@ function Calendar({ onDateSelect, selectedDate, profesional }) {
         return diasCerrados.includes(fechaStr);
     };
 
-    // 🔥 NUEVA FUNCIÓN: Verificar si el profesional tiene un día libre (vacaciones/descanso)
     const esDiaLibreProfesional = (date) => {
         if (!profesional) return false;
         if (!fechasLibresProfesional || fechasLibresProfesional.length === 0) return false;
         
         const fechaStr = formatDate(date);
         return fechasLibresProfesional.includes(fechaStr);
+    };
+
+    const esDiaCompletamenteOcupado = (date) => {
+        const fechaStr = formatDate(date);
+        return fechasCompletamenteOcupadas.includes(fechaStr);
+    };
+
+    const tieneHorariosConfigurados = (date) => {
+        const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+        const diaSemana = diasSemana[date.getDay()];
+        const horariosDelDia = horariosPorDia[diaSemana] || [];
+        return horariosDelDia.length > 0;
     };
 
     const nextMonth = () => {
@@ -182,6 +298,11 @@ function Calendar({ onDateSelect, selectedDate, profesional }) {
                         ✓ Fecha seleccionada
                     </span>
                 )}
+                {cargandoDisponibilidad && (
+                    <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded-full ml-2 animate-pulse">
+                        Verificando disponibilidad...
+                    </span>
+                )}
             </h2>
             
             <div className="bg-white/90 backdrop-blur-sm rounded-xl border-2 border-pink-200 shadow-sm overflow-hidden">
@@ -224,10 +345,12 @@ function Calendar({ onDateSelect, selectedDate, profesional }) {
                             
                             const profesionalTrabaja = profesionalTrabajaEsteDia(date);
                             const cerrado = esDiaCerrado(date);
-                            const diaLibreProfesional = esDiaLibreProfesional(date); // 🔥 NUEVO
+                            const diaLibreProfesional = esDiaLibreProfesional(date);
+                            const completamenteOcupado = esDiaCompletamenteOcupado(date);
+                            const tieneHorarios = tieneHorariosConfigurados(date);
                             
-                            // 🔥 MODIFICADO: Incluir verificación de días libres del profesional
-                            const available = !past && profesionalTrabaja && !cerrado && !diaLibreProfesional;
+                            // VERIFICACIÓN COMPLETA DE DISPONIBILIDAD
+                            const available = !past && profesionalTrabaja && !cerrado && !diaLibreProfesional && !completamenteOcupado && tieneHorarios;
                             
                             let className = "h-10 w-full flex items-center justify-center rounded-lg text-sm font-medium transition-all relative";
                             
@@ -244,6 +367,8 @@ function Calendar({ onDateSelect, selectedDate, profesional }) {
                                 title = "🚫 Día cerrado (feriado/vacaciones)";
                             } else if (diaLibreProfesional) {
                                 title = `✈️ ${profesional?.nombre} no trabaja este día (día libre/vacaciones)`;
+                            } else if (completamenteOcupado) {
+                                title = "🈵 Todos los horarios están ocupados";
                             } else if (past && dateStr === getTodayLocalString()) {
                                 title = "Hoy ya no hay horarios disponibles";
                             } else if (past) {
@@ -252,6 +377,8 @@ function Calendar({ onDateSelect, selectedDate, profesional }) {
                                 const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
                                 const diaSemana = diasSemana[date.getDay()];
                                 title = `${profesional.nombre} no trabaja los ${diaSemana}s`;
+                            } else if (!tieneHorarios) {
+                                title = "No hay horarios configurados para este día";
                             } else {
                                 title = "Disponible";
                             }
@@ -271,7 +398,10 @@ function Calendar({ onDateSelect, selectedDate, profesional }) {
                                     {diaLibreProfesional && !cerrado && (
                                         <span className="absolute top-0 right-0 text-[10px] text-orange-500">✈️</span>
                                     )}
-                                    {available && !selected && !cerrado && !diaLibreProfesional && (
+                                    {completamenteOcupado && !cerrado && !diaLibreProfesional && (
+                                        <span className="absolute top-0 right-0 text-[10px] text-red-500">🈵</span>
+                                    )}
+                                    {available && !selected && !cerrado && !diaLibreProfesional && !completamenteOcupado && (
                                         <span className="absolute bottom-0.5 left-1/2 transform -translate-x-1/2 w-1 h-1 bg-pink-400 rounded-full"></span>
                                     )}
                                 </button>
@@ -310,6 +440,15 @@ function Calendar({ onDateSelect, selectedDate, profesional }) {
                             </span>
                         </div>
                     )}
+                    {fechasCompletamenteOcupadas.length > 0 && (
+                        <div className="flex items-center gap-2 mt-2">
+                            <span className="text-red-500 text-lg">🈵</span>
+                            <span>
+                                <strong>Días sin horarios disponibles:</strong>{' '}
+                                {fechasCompletamenteOcupadas.length} día(s) completamente ocupado(s)
+                            </span>
+                        </div>
+                    )}
                     <div className="flex items-center gap-2 mt-2 flex-wrap">
                         <span className="w-3 h-3 bg-pink-500 rounded-full"></span>
                         <span>Disponible</span>
@@ -319,6 +458,8 @@ function Calendar({ onDateSelect, selectedDate, profesional }) {
                         <span>Día libre/vacaciones</span>
                         <span className="w-3 h-3 bg-red-300 rounded-full ml-3"></span>
                         <span>Local cerrado</span>
+                        <span className="w-3 h-3 bg-red-400 rounded-full ml-3"></span>
+                        <span>Sin horarios/Ocupado</span>
                     </div>
                 </div>
             )}

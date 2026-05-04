@@ -249,6 +249,7 @@ function ClientApp() {
                                         onDateSelect={setSelectedDate} 
                                         selectedDate={selectedDate}
                                         profesional={selectedProfesional}
+                                        service={selectedService}
                                     />
                                 </div>
                             )}

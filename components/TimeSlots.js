@@ -1,10 +1,9 @@
 // components/TimeSlots.js - Versión femenina con filtro de horarios permitidos por servicio
 
-function TimeSlots({ service, date, profesional, onTimeSelect, selectedTime }) {
+function TimeSlots({ service, date, profesional, onTimeSelect, selectedTime, horariosPorDia }) {
     const [slots, setSlots] = React.useState([]);
     const [loading, setLoading] = React.useState(false);
     const [error, setError] = React.useState(null);
-    const [horariosPorDia, setHorariosPorDia] = React.useState({});
     const [diaTrabaja, setDiaTrabaja] = React.useState(true);
     const [verificacionCompleta, setVerificacionCompleta] = React.useState(false);
     const [maxAntelacionDias, setMaxAntelacionDias] = React.useState(30);
@@ -52,29 +51,34 @@ function TimeSlots({ service, date, profesional, onTimeSelect, selectedTime }) {
         return hours * 60 + minutes;
     };
 
+    // Usar horariosPorDia desde props si viene, sino cargarlos
     React.useEffect(() => {
         if (!profesional) return;
         
-        const cargarHorarios = async () => {
+        if (horariosPorDia && Object.keys(horariosPorDia).length > 0) {
+            // Usar los horarios que ya vienen del Calendar
+            console.log('📅 Usando horariosPorDia recibidos del Calendar:', horariosPorDia);
             setVerificacionCompleta(false);
-            try {
-                console.log(`📅 Cargando horarios por día de ${profesional.nombre}...`);
-                const horarios = await window.salonConfig.getHorariosPorDia(profesional.id);
+            
+            const tieneHorarios = Object.keys(horariosPorDia).length > 0;
+            if (!tieneHorarios) {
+                console.log('⚠️ No hay horarios configurados para este profesional');
+            }
+        } else {
+            // Fallback: cargar desde API si no vienen como prop
+            setVerificacionCompleta(false);
+            console.log(`📅 Cargando horarios por día de ${profesional.nombre} desde API...`);
+            window.salonConfig.getHorariosPorDia(profesional.id).then(horarios => {
                 console.log(`✅ Horarios por día de ${profesional.nombre}:`, horarios);
-                setHorariosPorDia(horarios);
-                
                 const tieneHorarios = Object.keys(horarios).length > 0;
                 if (!tieneHorarios) {
                     console.log('⚠️ No hay horarios configurados para este profesional');
                 }
-            } catch (error) {
+            }).catch(error => {
                 console.error('Error cargando horarios:', error);
-                setHorariosPorDia({});
-            }
-        };
-        
-        cargarHorarios();
-    }, [profesional]);
+            });
+        }
+    }, [profesional, horariosPorDia]);
 
     React.useEffect(() => {
         if (!profesional || !date) {
@@ -82,10 +86,12 @@ function TimeSlots({ service, date, profesional, onTimeSelect, selectedTime }) {
             return;
         }
 
+        const horarios = horariosPorDia || {};
+
         console.log('🔍 Verificando disponibilidad para:', {
             profesional: profesional.nombre,
             fecha: date,
-            horariosPorDia
+            horariosPorDia: horarios
         });
 
         const [año, mes, día] = date.split('-').map(Number);
@@ -94,7 +100,7 @@ function TimeSlots({ service, date, profesional, onTimeSelect, selectedTime }) {
         const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
         const diaSemana = diasSemana[fechaLocal.getDay()];
         
-        const horariosDelDia = horariosPorDia[diaSemana] || [];
+        const horariosDelDia = (horarios[diaSemana] || []);
         const trabaja = horariosDelDia.length > 0;
         
         console.log(`🎯 ¿${profesional.nombre} trabaja el ${diaSemana}?`, trabaja);
@@ -138,7 +144,8 @@ function TimeSlots({ service, date, profesional, onTimeSelect, selectedTime }) {
                 const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
                 const diaSemana = diasSemana[fechaLocal.getDay()];
                 
-                const indicesDelDia = horariosPorDia[diaSemana] || [];
+                const horarios = horariosPorDia || {};
+                const indicesDelDia = horarios[diaSemana] || [];
                 
                 if (indicesDelDia.length === 0) {
                     console.log(`⚠️ No hay horas configuradas para ${diaSemana}`);
@@ -150,7 +157,7 @@ function TimeSlots({ service, date, profesional, onTimeSelect, selectedTime }) {
                 // Slots base (todos los horarios del profesional para ese día)
                 let baseSlots = indicesDelDia.map(indice => indiceToHoraLegible(indice));
                 
-                // 🔥 FILTRO POR HORARIOS PERMITIDOS DEL SERVICIO (si existen)
+                // FILTRO POR HORARIOS PERMITIDOS DEL SERVICIO (si existen)
                 if (service.horarios_permitidos && service.horarios_permitidos.length > 0) {
                     baseSlots = baseSlots.filter(slot => service.horarios_permitidos.includes(slot));
                     console.log(`📋 Slots filtrados por horarios permitidos del servicio:`, baseSlots);
