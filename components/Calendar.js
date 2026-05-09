@@ -1,4 +1,4 @@
-// components/Calendar.js - VERSIÓN CON VERIFICACIÓN DE DISPONIBILIDAD REAL
+// components/Calendar.js - Disponibilidad real por servicio, profesional y reservas
 
 function Calendar({ onDateSelect, selectedDate, profesional, service, onHorariosCargados }) {
     const [currentDate, setCurrentDate] = React.useState(new Date());
@@ -7,8 +7,11 @@ function Calendar({ onDateSelect, selectedDate, profesional, service, onHorarios
     const [cargandoHorarios, setCargandoHorarios] = React.useState(false);
     const [fechasLibresProfesional, setFechasLibresProfesional] = React.useState([]);
     const [horariosPorDia, setHorariosPorDia] = React.useState({});
-    const [fechasCompletamenteOcupadas, setFechasCompletamenteOcupadas] = React.useState([]);
+    const [descansosPorDia, setDescansosPorDia] = React.useState({});
+    const [fechasSinDisponibilidad, setFechasSinDisponibilidad] = React.useState([]);
     const [cargandoDisponibilidad, setCargandoDisponibilidad] = React.useState(false);
+    const [minAntelacionHoras, setMinAntelacionHoras] = React.useState(2);
+    const [maxAntelacionDias, setMaxAntelacionDias] = React.useState(30);
 
     const indiceToHoraLegible = (indice) => {
         const horas = Math.floor(indice / 2);
@@ -17,8 +20,32 @@ function Calendar({ onDateSelect, selectedDate, profesional, service, onHorarios
     };
 
     const timeToMinutes = (timeStr) => {
-        const [hours, minutes] = timeStr.split(':').map(Number);
-        return hours * 60 + minutes;
+        const [hours, minutes] = String(timeStr || '00:00').split(':').map(Number);
+        return (hours || 0) * 60 + (minutes || 0);
+    };
+
+    const formatDate = (date) => {
+        const y = date.getFullYear();
+        const m = (date.getMonth() + 1).toString().padStart(2, '0');
+        const d = date.getDate().toString().padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    };
+
+    const getNegocioIdLocal = () => {
+        if (typeof window.getNegocioIdFromConfig === 'function') return window.getNegocioIdFromConfig();
+        if (typeof window.getNegocioId === 'function') return window.getNegocioId();
+        return localStorage.getItem('negocioId');
+    };
+
+    const getTodayLocalString = () => formatDate(new Date());
+
+    const slotTieneDescanso = (slotStart, slotEnd, descansosDelDia = []) => {
+        return descansosDelDia.some(descanso => {
+            if (!descanso?.inicio || !descanso?.fin) return false;
+            const descansoStart = timeToMinutes(descanso.inicio);
+            const descansoEnd = timeToMinutes(descanso.fin);
+            return (slotStart < descansoEnd) && (slotEnd > descansoStart);
+        });
     };
 
     React.useEffect(() => {
@@ -27,32 +54,33 @@ function Calendar({ onDateSelect, selectedDate, profesional, service, onHorarios
         const cargarDisponibilidad = async () => {
             setCargandoHorarios(true);
             try {
+                const config = window.salonConfig ? await window.salonConfig.get() : {};
+                setMinAntelacionHoras(config?.min_antelacion_horas ?? 2);
+                setMaxAntelacionDias(config?.max_antelacion_dias ?? 30);
+
                 const horarios = await window.salonConfig.getHorariosProfesional(profesional.id);
-                console.log(`📅 Días laborales de ${profesional.nombre}:`, horarios.dias);
+                const porDia = horarios.horariosPorDia || {};
+                const descansos = window.salonConfig.getDescansosPorDia ?
+                    await window.salonConfig.getDescansosPorDia(profesional.id) :
+                    {};
+
                 setDiasLaborales(horarios.dias || []);
-                setHorariosPorDia(horarios.horariosPorDia || {});
-                if (onHorariosCargados) onHorariosCargados(horarios.horariosPorDia || {}); // LÍNEA NUEVA
+                setHorariosPorDia(porDia);
+                setDescansosPorDia(descansos || {});
+                if (onHorariosCargados) onHorariosCargados(porDia);
                 
                 const diasCerradosList = await window.getDiasCerrados();
-                setDiasCerrados(diasCerradosList.map(d => d.fecha));
+                setDiasCerrados((diasCerradosList || []).map(d => d.fecha));
+                setFechasLibresProfesional(profesional.fechas_libres || []);
                 
-                // Cargar días libres del profesional
-                if (profesional.fechas_libres) {
-                    console.log(`📅 Días libres de ${profesional.nombre}:`, profesional.fechas_libres);
-                    setFechasLibresProfesional(profesional.fechas_libres);
-                } else {
-                    setFechasLibresProfesional([]);
-                }
-                
-                // Verificar disponibilidad real de cada día del mes
-                await verificarDisponibilidadMes(horarios.horariosPorDia || {});
-                
+                await verificarDisponibilidadMes(porDia, descansos || {}, config);
             } catch (error) {
                 console.error('Error cargando disponibilidad:', error);
                 setDiasLaborales([]);
                 setDiasCerrados([]);
                 setFechasLibresProfesional([]);
                 setHorariosPorDia({});
+                setDescansosPorDia({});
             } finally {
                 setCargandoHorarios(false);
             }
@@ -66,36 +94,34 @@ function Calendar({ onDateSelect, selectedDate, profesional, service, onHorarios
         return () => {
             window.removeEventListener('diasCerradosActualizados', handleActualizacion);
         };
-        
-    }, [profesional]);
+    }, [profesional, service]);
 
     React.useEffect(() => {
         if (Object.keys(horariosPorDia).length > 0) {
-            verificarDisponibilidadMes(horariosPorDia);
+            verificarDisponibilidadMes(horariosPorDia, descansosPorDia);
         }
-    }, [currentDate]);
+    }, [currentDate, service]);
 
-    const verificarDisponibilidadMes = async (horarios) => {
+    const verificarDisponibilidadMes = async (horarios, descansos = {}, configOverride = null) => {
         if (!service || !profesional) {
-            setFechasCompletamenteOcupadas([]);
+            setFechasSinDisponibilidad([]);
             return;
         }
 
         setCargandoDisponibilidad(true);
         
         try {
+            const negocioId = getNegocioIdLocal();
             const year = currentDate.getFullYear();
             const month = currentDate.getMonth();
             const diasEnMes = new Date(year, month + 1, 0).getDate();
+            const fechaInicio = formatDate(new Date(year, month, 1));
+            const fechaFin = formatDate(new Date(year, month + 1, 0));
+            const minHoras = configOverride?.min_antelacion_horas ?? minAntelacionHoras;
+            const maxDias = configOverride?.max_antelacion_dias ?? maxAntelacionDias;
             
-            const primerDia = new Date(year, month, 1);
-            const ultimoDia = new Date(year, month + 1, 0);
-            const fechaInicio = formatDate(primerDia);
-            const fechaFin = formatDate(ultimoDia);
-            
-            // Obtener todas las reservas del mes
             const response = await fetch(
-                `${window.SUPABASE_URL}/rest/v1/reservas?negocio_id=eq.${window.getNegocioId()}&fecha=gte.${fechaInicio}&fecha=lte.${fechaFin}&profesional_id=eq.${profesional.id}&estado=neq.Cancelado&select=fecha,hora_inicio,hora_fin`,
+                `${window.SUPABASE_URL}/rest/v1/reservas?negocio_id=eq.${negocioId}&fecha=gte.${fechaInicio}&fecha=lte.${fechaFin}&profesional_id=eq.${profesional.id}&estado=neq.Cancelado&select=fecha,hora_inicio,hora_fin`,
                 {
                     headers: {
                         'apikey': window.SUPABASE_ANON_KEY,
@@ -105,127 +131,87 @@ function Calendar({ onDateSelect, selectedDate, profesional, service, onHorarios
             );
             
             const reservas = response.ok ? await response.json() : [];
-            
-            // Agrupar reservas por fecha
             const reservasPorFecha = {};
             (reservas || []).forEach(r => {
-                if (!reservasPorFecha[r.fecha]) {
-                    reservasPorFecha[r.fecha] = [];
-                }
+                if (!reservasPorFecha[r.fecha]) reservasPorFecha[r.fecha] = [];
                 reservasPorFecha[r.fecha].push(r);
             });
             
             const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
-            const completamenteOcupadas = [];
+            const sinDisponibilidad = [];
+            const ahora = new Date();
+            const minFechaPermitida = new Date(Date.now() + (minHoras * 60 * 60 * 1000));
             
-            // Verificar cada día del mes
             for (let d = 1; d <= diasEnMes; d++) {
                 const fecha = new Date(year, month, d);
                 const fechaStr = formatDate(fecha);
                 const diaSemana = diasSemana[fecha.getDay()];
-                const horariosDelDia = horarios[diaSemana] || [];
+                const diffDias = Math.ceil((new Date(`${fechaStr}T00:00:00`) - new Date(formatDate(ahora) + 'T00:00:00')) / (1000 * 60 * 60 * 24));
+                let baseSlots = (horarios[diaSemana] || []).map(indiceToHoraLegible);
                 
-                if (horariosDelDia.length === 0) continue;
+                if (service.horarios_permitidos && service.horarios_permitidos.length > 0) {
+                    baseSlots = baseSlots.filter(slot => service.horarios_permitidos.includes(slot));
+                }
+                
+                if (baseSlots.length === 0 || diffDias > maxDias) {
+                    sinDisponibilidad.push(fechaStr);
+                    continue;
+                }
                 
                 const reservasDia = reservasPorFecha[fechaStr] || [];
-                const slotsOcupados = horariosDelDia.filter(indice => {
-                    const slotStr = indiceToHoraLegible(indice);
-                    const [horas, minutos] = slotStr.split(':').map(Number);
-                    const slotStart = horas * 60 + minutos;
-                    const slotEnd = slotStart + service.duracion;
+                const descansosDelDia = descansos[diaSemana] || [];
+                const tieneSlotDisponible = baseSlots.some(slotStr => {
+                    const slotStart = timeToMinutes(slotStr);
+                    const slotEnd = slotStart + (parseInt(service.duracion) || 60);
+                    const fechaHoraSlot = new Date(year, month, d, Math.floor(slotStart / 60), slotStart % 60, 0);
                     
-                    return reservasDia.some(reserva => {
+                    if (fechaHoraSlot < minFechaPermitida) return false;
+                    if (slotTieneDescanso(slotStart, slotEnd, descansosDelDia)) return false;
+                    
+                    return !reservasDia.some(reserva => {
                         const reservaStart = timeToMinutes(reserva.hora_inicio);
                         const reservaEnd = timeToMinutes(reserva.hora_fin);
                         return (slotStart < reservaEnd) && (slotEnd > reservaStart);
                     });
-                }).length;
+                });
                 
-                if (slotsOcupados >= horariosDelDia.length) {
-                    completamenteOcupadas.push(fechaStr);
+                if (!tieneSlotDisponible) {
+                    sinDisponibilidad.push(fechaStr);
                 }
             }
             
-            setFechasCompletamenteOcupadas(completamenteOcupadas);
-            
+            setFechasSinDisponibilidad(sinDisponibilidad);
         } catch (error) {
-            console.error('Error verificando disponibilidad:', error);
+            console.error('Error verificando disponibilidad real del mes:', error);
+            setFechasSinDisponibilidad([]);
         } finally {
             setCargandoDisponibilidad(false);
         }
     };
 
-    const formatDate = (date) => {
-        const y = date.getFullYear();
-        const m = (date.getMonth() + 1).toString().padStart(2, '0');
-        const d = date.getDate().toString().padStart(2, '0');
-        return `${y}-${m}-${d}`;
-    };
-
-    const getTodayLocalString = () => {
-        const today = new Date();
-        const year = today.getFullYear();
-        const month = String(today.getMonth() + 1).padStart(2, '0');
-        const day = String(today.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    };
-
     const isPastDate = (date) => {
-        const now = new Date();
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
-        const todayStr = getTodayLocalString();
-        const dateStr = formatDate(date);
-        
-        if (date < today) return true;
-        
-        if (dateStr === todayStr) {
-            const currentHour = now.getHours();
-            const currentMinutes = now.getMinutes();
-            
-            const LAST_SLOT_HOUR = 20;
-            const LAST_SLOT_MINUTES = 0;
-            
-            if (currentHour > LAST_SLOT_HOUR) return true;
-            if (currentHour === LAST_SLOT_HOUR && currentMinutes > LAST_SLOT_MINUTES) return true;
-        }
-        
-        return false;
+        return date < today;
     };
 
     const profesionalTrabajaEsteDia = (date) => {
-        if (!profesional) return true;
-        
-        if (diasLaborales.length === 0) return true;
-        
+        if (!profesional || diasLaborales.length === 0) return true;
         const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
-        const diaSemana = diasSemana[date.getDay()];
-        return diasLaborales.includes(diaSemana);
+        return diasLaborales.includes(diasSemana[date.getDay()]);
     };
 
-    const esDiaCerrado = (date) => {
-        const fechaStr = formatDate(date);
-        return diasCerrados.includes(fechaStr);
-    };
-
-    const esDiaLibreProfesional = (date) => {
-        if (!profesional) return false;
-        if (!fechasLibresProfesional || fechasLibresProfesional.length === 0) return false;
-        
-        const fechaStr = formatDate(date);
-        return fechasLibresProfesional.includes(fechaStr);
-    };
-
-    const esDiaCompletamenteOcupado = (date) => {
-        const fechaStr = formatDate(date);
-        return fechasCompletamenteOcupadas.includes(fechaStr);
-    };
+    const esDiaCerrado = (date) => diasCerrados.includes(formatDate(date));
+    const esDiaLibreProfesional = (date) => (fechasLibresProfesional || []).includes(formatDate(date));
+    const esDiaSinDisponibilidad = (date) => fechasSinDisponibilidad.includes(formatDate(date));
 
     const tieneHorariosConfigurados = (date) => {
         const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
         const diaSemana = diasSemana[date.getDay()];
-        const horariosDelDia = horariosPorDia[diaSemana] || [];
+        let horariosDelDia = (horariosPorDia[diaSemana] || []).map(indiceToHoraLegible);
+        if (service?.horarios_permitidos?.length) {
+            horariosDelDia = horariosDelDia.filter(slot => service.horarios_permitidos.includes(slot));
+        }
         return horariosDelDia.length > 0;
     };
 
@@ -244,20 +230,11 @@ function Calendar({ onDateSelect, selectedDate, profesional, service, onHorarios
     const getDaysInMonth = () => {
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth();
-        
         const firstDay = new Date(year, month, 1);
         const lastDay = new Date(year, month + 1, 0);
-        
         const days = [];
-        
-        for (let i = 0; i < firstDay.getDay(); i++) {
-            days.push(null);
-        }
-        
-        for (let i = 1; i <= lastDay.getDate(); i++) {
-            days.push(new Date(year, month, i));
-        }
-        
+        for (let i = 0; i < firstDay.getDay(); i++) days.push(null);
+        for (let i = 1; i <= lastDay.getDate(); i++) days.push(new Date(year, month, i));
         return days;
     };
 
@@ -269,7 +246,7 @@ function Calendar({ onDateSelect, selectedDate, profesional, service, onHorarios
             <div className="space-y-4 animate-fade-in">
                 <h2 className="text-lg font-semibold text-pink-700 flex items-center gap-2">
                     <span className="text-2xl">📅</span>
-                    3. Seleccioná una fecha
+                    3. Selecciona una fecha
                     {profesional && (
                         <span className="text-sm bg-pink-100 text-pink-700 px-3 py-1 rounded-full ml-2">
                             con {profesional.nombre}
@@ -288,7 +265,7 @@ function Calendar({ onDateSelect, selectedDate, profesional, service, onHorarios
         <div className="space-y-4 animate-fade-in">
             <h2 className="text-lg font-semibold text-pink-700 flex items-center gap-2">
                 <span className="text-2xl">📅</span>
-                3. Seleccioná una fecha
+                3. Selecciona una fecha
                 {profesional && (
                     <span className="text-sm bg-pink-100 text-pink-700 px-3 py-1 rounded-full ml-2">
                         con {profesional.nombre}
@@ -296,43 +273,29 @@ function Calendar({ onDateSelect, selectedDate, profesional, service, onHorarios
                 )}
                 {selectedDate && (
                     <span className="text-xs bg-pink-100 text-pink-700 px-2 py-1 rounded-full ml-2">
-                        ✓ Fecha seleccionada
+                        Fecha seleccionada
                     </span>
                 )}
                 {cargandoDisponibilidad && (
                     <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded-full ml-2 animate-pulse">
-                        Verificando disponibilidad...
+                        Verificando...
                     </span>
                 )}
             </h2>
             
             <div className="bg-white/90 backdrop-blur-sm rounded-xl border-2 border-pink-200 shadow-sm overflow-hidden">
                 <div className="flex items-center justify-between p-4 bg-gradient-to-r from-pink-50 to-pink-100 border-b border-pink-200">
-                    <button 
-                        onClick={prevMonth} 
-                        className="p-2 hover:bg-white/50 rounded-full transition-colors text-pink-600"
-                        title="Mes anterior"
-                    >
-                        ◀
-                    </button>
+                    <button onClick={prevMonth} className="p-2 hover:bg-white/50 rounded-full transition-colors text-pink-600" title="Mes anterior">◀</button>
                     <span className="font-bold text-pink-800 text-lg capitalize">
                         {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
                     </span>
-                    <button 
-                        onClick={nextMonth} 
-                        className="p-2 hover:bg-white/50 rounded-full transition-colors text-pink-600"
-                        title="Mes siguiente"
-                    >
-                        ▶
-                    </button>
+                    <button onClick={nextMonth} className="p-2 hover:bg-white/50 rounded-full transition-colors text-pink-600" title="Mes siguiente">▶</button>
                 </div>
 
                 <div className="p-4">
                     <div className="grid grid-cols-7 mb-2 text-center">
                         {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((d, i) => (
-                            <div key={i} className={`text-xs font-medium py-1 ${d === 'D' ? 'text-pink-400' : 'text-pink-600'}`}>
-                                {d}
-                            </div>
+                            <div key={i} className={`text-xs font-medium py-1 ${d === 'D' ? 'text-pink-400' : 'text-pink-600'}`}>{d}</div>
                         ))}
                     </div>
                     
@@ -343,68 +306,37 @@ function Calendar({ onDateSelect, selectedDate, profesional, service, onHorarios
                             const dateStr = formatDate(date);
                             const past = isPastDate(date);
                             const selected = selectedDate === dateStr;
-                            
                             const profesionalTrabaja = profesionalTrabajaEsteDia(date);
                             const cerrado = esDiaCerrado(date);
                             const diaLibreProfesional = esDiaLibreProfesional(date);
-                            const completamenteOcupado = esDiaCompletamenteOcupado(date);
+                            const sinDisponibilidad = esDiaSinDisponibilidad(date);
                             const tieneHorarios = tieneHorariosConfigurados(date);
-                            
-                            // VERIFICACIÓN COMPLETA DE DISPONIBILIDAD
-                            const available = !past && profesionalTrabaja && !cerrado && !diaLibreProfesional && !completamenteOcupado && tieneHorarios;
+                            const available = !past && profesionalTrabaja && !cerrado && !diaLibreProfesional && !sinDisponibilidad && tieneHorarios;
                             
                             let className = "h-10 w-full flex items-center justify-center rounded-lg text-sm font-medium transition-all relative";
-                            
-                            if (selected) {
-                                className += " bg-pink-500 text-white shadow-md scale-105 ring-2 ring-pink-300";
-                            } else if (!available) {
-                                className += " text-pink-300 cursor-not-allowed bg-pink-50/50";
-                            } else {
-                                className += " text-pink-700 hover:bg-pink-100 hover:text-pink-600 hover:scale-105 cursor-pointer";
-                            }
+                            if (selected) className += " bg-pink-500 text-white shadow-md scale-105 ring-2 ring-pink-300";
+                            else if (!available) className += " text-pink-300 cursor-not-allowed bg-pink-50/50";
+                            else className += " text-pink-700 hover:bg-pink-100 hover:text-pink-600 hover:scale-105 cursor-pointer";
                             
                             let title = "";
-                            if (cerrado) {
-                                title = "🚫 Día cerrado (feriado/vacaciones)";
-                            } else if (diaLibreProfesional) {
-                                title = `✈️ ${profesional?.nombre} no trabaja este día (día libre/vacaciones)`;
-                            } else if (completamenteOcupado) {
-                                title = "📅❌ Todos los horarios están ocupados";
-                            } else if (past && dateStr === getTodayLocalString()) {
-                                title = "Hoy ya no hay horarios disponibles";
-                            } else if (past) {
-                                title = "Fecha pasada";
-                            } else if (!profesionalTrabaja && profesional) {
+                            if (cerrado) title = "Dia cerrado";
+                            else if (diaLibreProfesional) title = `${profesional?.nombre} no trabaja este dia`;
+                            else if (sinDisponibilidad) title = "Sin horarios disponibles para este servicio";
+                            else if (past && dateStr === getTodayLocalString()) title = "Hoy ya no hay horarios disponibles";
+                            else if (past) title = "Fecha pasada";
+                            else if (!profesionalTrabaja && profesional) {
                                 const diasSemana = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
-                                const diaSemana = diasSemana[date.getDay()];
-                                title = `${profesional.nombre} no trabaja los ${diaSemana}s`;
-                            } else if (!tieneHorarios) {
-                                title = "No hay horarios configurados para este día";
-                            } else {
-                                title = "Disponible";
-                            }
+                                title = `${profesional.nombre} no trabaja los ${diasSemana[date.getDay()]}s`;
+                            } else if (!tieneHorarios) title = "No hay horarios configurados para este dia";
+                            else title = "Disponible";
                             
                             return (
-                                <button
-                                    key={idx}
-                                    onClick={() => available && onDateSelect(dateStr)}
-                                    disabled={!available}
-                                    className={className}
-                                    title={title}
-                                >
+                                <button key={idx} onClick={() => available && onDateSelect(dateStr)} disabled={!available} className={className} title={title}>
                                     {date.getDate()}
-                                    {cerrado && (
-                                        <span className="absolute top-0 right-0 text-[10px] text-red-500">🚫</span>
-                                    )}
-                                    {diaLibreProfesional && !cerrado && (
-                                        <span className="absolute top-0 right-0 text-[10px] text-orange-500">✈️</span>
-                                    )}
-                                    {completamenteOcupado && !cerrado && !diaLibreProfesional && (
-                                        <span className="absolute top-0 right-0 text-[10px] text-red-500">📅❌</span>
-                                    )}
-                                    {available && !selected && !cerrado && !diaLibreProfesional && !completamenteOcupado && (
-                                        <span className="absolute bottom-0.5 left-1/2 transform -translate-x-1/2 w-1 h-1 bg-pink-400 rounded-full"></span>
-                                    )}
+                                    {cerrado && <span className="absolute top-0 right-0 text-[10px] text-red-500">×</span>}
+                                    {diaLibreProfesional && !cerrado && <span className="absolute top-0 right-0 text-[10px] text-orange-500">○</span>}
+                                    {sinDisponibilidad && !cerrado && !diaLibreProfesional && <span className="absolute top-0 right-0 text-[10px] text-red-500">×</span>}
+                                    {available && !selected && <span className="absolute bottom-0.5 left-1/2 transform -translate-x-1/2 w-1 h-1 bg-pink-400 rounded-full"></span>}
                                 </button>
                             );
                         })}
@@ -417,51 +349,24 @@ function Calendar({ onDateSelect, selectedDate, profesional, service, onHorarios
                     <div className="flex items-center gap-2">
                         <span className="text-pink-400 text-lg">📅</span>
                         <span>
-                            <strong>Días que trabaja {profesional.nombre}:</strong>{' '}
-                            {diasLaborales.length > 0 
+                            <strong>Dias que trabaja {profesional.nombre}:</strong>{' '}
+                            {diasLaborales.length > 0
                                 ? diasLaborales.map(d => d.charAt(0).toUpperCase() + d.slice(1)).join(', ')
-                                : 'Todos los días (sin configuración específica)'}
+                                : 'Todos los dias (sin configuracion especifica)'}
                         </span>
                     </div>
                     {fechasLibresProfesional.length > 0 && (
                         <div className="flex items-center gap-2 mt-2">
-                            <span className="text-orange-500 text-lg">✈️</span>
-                            <span>
-                                <strong>Días libres de {profesional.nombre}:</strong>{' '}
-                                {fechasLibresProfesional.length} día(s) no disponible(s) por vacaciones/descanso
-                            </span>
+                            <span className="text-orange-500 text-lg">○</span>
+                            <span><strong>Dias libres:</strong> {fechasLibresProfesional.length} dia(s) no disponible(s)</span>
                         </div>
                     )}
                     {diasCerrados.length > 0 && (
                         <div className="flex items-center gap-2 mt-2">
-                            <span className="text-red-400 text-lg">🚫</span>
-                            <span>
-                                <strong>Días cerrados del local:</strong>{' '}
-                                {diasCerrados.length} día(s) no disponible(s)
-                            </span>
+                            <span className="text-red-400 text-lg">×</span>
+                            <span><strong>Dias cerrados del local:</strong> {diasCerrados.length} dia(s) no disponible(s)</span>
                         </div>
                     )}
-                    {fechasCompletamenteOcupadas.length > 0 && (
-                        <div className="flex items-center gap-2 mt-2">
-                            <span className="text-red-500 text-lg">📅❌</span>
-                            <span>
-                                <strong>Días sin horarios disponibles:</strong>{' '}
-                                {fechasCompletamenteOcupadas.length} día(s) completamente ocupado(s)
-                            </span>
-                        </div>
-                    )}
-                    <div className="flex items-center gap-2 mt-2 flex-wrap">
-                        <span className="w-3 h-3 bg-pink-500 rounded-full"></span>
-                        <span>Disponible</span>
-                        <span className="w-3 h-3 bg-pink-200 rounded-full ml-3"></span>
-                        <span>No disponible (día no laboral)</span>
-                        <span className="w-3 h-3 bg-orange-300 rounded-full ml-3"></span>
-                        <span>Día libre/vacaciones</span>
-                        <span className="w-3 h-3 bg-red-300 rounded-full ml-3"></span>
-                        <span>Local cerrado</span>
-                        <span className="w-3 h-3 bg-red-400 rounded-full ml-3"></span>
-                        <span>Sin horarios/Ocupado</span>
-                    </div>
                 </div>
             )}
         </div>

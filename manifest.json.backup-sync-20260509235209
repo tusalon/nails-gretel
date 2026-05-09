@@ -1,0 +1,22 @@
+{
+  "name": "Nails Gretel",
+  "short_name": "Gretel Nails",
+  "description": "Uñas y belleza - Tu espacio de cuidado personal",
+  "start_url": "/nails-gretel/",
+  "scope": "/nails-gretel/",
+  "display": "standalone",
+  "background_color": "#ec4899",
+  "theme_color": "#ec4899",
+  "icons": [
+    {
+      "src": "/nails-gretel/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/nails-gretel/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

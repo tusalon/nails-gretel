@@ -29,7 +29,7 @@ function ClientApp() {
     const [bookingConfirmed, setBookingConfirmed] = React.useState(null);
     const [userRol, setUserRol] = React.useState('cliente');
     const [history, setHistory] = React.useState(['auth']);
-    const [horariosPorDia, setHorariosPorDia] = React.useState({}); // NUEVO
+    const [horariosPorDia, setHorariosPorDia] = React.useState({});
 
     // ============================================
     // DETECTAR SESIÓN AL INICIAR Y REDIRIGIR SEGÚN ROL
@@ -152,6 +152,14 @@ function ClientApp() {
         navigateTo('service');
     };
 
+    const handleServiceSelect = (service) => {
+        setSelectedService(service);
+        setSelectedProfesional(null);
+        setSelectedDate('');
+        setSelectedTime('');
+        setHorariosPorDia({});
+    };
+
     const handleLogout = () => {
         localStorage.removeItem('clienteAuth');
         setCliente(null);
@@ -228,7 +236,7 @@ function ClientApp() {
                         <div className="max-w-3xl mx-auto px-4 py-6 space-y-6 pb-20">
                             {/* SECCIÓN 1: SERVICIOS */}
                             <ServiceSelection 
-                                onSelect={setSelectedService} 
+                                onSelect={handleServiceSelect} 
                                 selectedService={selectedService}
                             />
                             
@@ -250,7 +258,7 @@ function ClientApp() {
                                         onDateSelect={setSelectedDate} 
                                         selectedDate={selectedDate}
                                         profesional={selectedProfesional}
-                                        service={selectedService}
+                                    service={selectedService}
                                         onHorariosCargados={setHorariosPorDia}
                                     />
                                 </div>
@@ -265,7 +273,7 @@ function ClientApp() {
                                         profesional={selectedProfesional}
                                         onTimeSelect={setSelectedTime}
                                         selectedTime={selectedTime}
-                                        horariosPorDia={horariosPorDia}
+                                    horariosPorDia={horariosPorDia}
                                     />
                                 </div>
                             )}
