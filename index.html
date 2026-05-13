@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cargando...</title>
-    <meta name="description" content="Uñas y belleza - Tu espacio de cuidado personal">
+    <meta name="description" content="Reservá tu turno online">
+    
+    <!-- PWA Meta Tags -->
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#ec4899">
     <meta name="mobile-web-app-capable" content="yes">
@@ -13,30 +15,41 @@
     <meta name="apple-mobile-web-app-title" content="Gretel Nails">
     <link rel="apple-touch-icon" href="icons/icon-192x192.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192x192.png">
-
+    
+    <!-- Script para service worker (VERSIÓN DINÁMICA) -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
+                // Detectar la ruta base automáticamente
                 const pathSegments = window.location.pathname.split('/');
                 const basePath = pathSegments.length > 2 ? '/' + pathSegments[1] : '';
                 const swPath = basePath ? `${basePath}/sw.js` : '/sw.js';
-                console.log('Registrando Service Worker en:', swPath);
+                
+                console.log('🔄 🔄 Registrando Service Worker en:', swPath);
+                
                 navigator.serviceWorker.register(swPath)
-                    .then(registration => console.log('Service Worker registrado:', registration.scope))
-                    .catch(error => console.log('Error registrando Service Worker:', error));
+                    .then(registration => {
+                        console.log('✅ ✅ Service Worker registrado:', registration.scope);
+                    })
+                    .catch(error => {
+                        console.log('❌ ❌ Error registrando Service Worker:', error);
+                    });
             });
         }
     </script>
-
+    
+    <!-- Scripts externos -->
     <script src="https://resource.trickle.so/vendor_lib/unpkg/react@18/umd/react.production.min.js"></script>
     <script src="https://resource.trickle.so/vendor_lib/unpkg/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://resource.trickle.so/vendor_lib/unpkg/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link href="https://resource.trickle.so/vendor_lib/unpkg/lucide-static@0.516.0/font/lucide.css" rel="stylesheet">
-
+    
     <style type="text/tailwindcss">
         @layer utilities {
-            .animate-fade-in { animation: fadeIn 0.5s ease-out forwards; }
+            .animate-fade-in {
+                animation: fadeIn 0.5s ease-out forwards;
+            }
         }
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(10px); }
@@ -47,6 +60,7 @@
 <body>
     <div id="root"></div>
 
+    <!-- Scripts (rutas relativas) -->
     <script src="utils/supabase-config.js"></script>
     <script src="utils/config-negocio.js"></script>
     <script src="utils/storage.js"></script>
@@ -58,13 +72,18 @@
     <script src="utils/servicios.js"></script>
     <script src="utils/profesionales.js"></script>
     <script src="utils/whatsapp-helper.js"></script>
-    <script src="utils/dias-cerrados.js"></script>
+     <script src="utils/dias-cerrados.js"></script>
 
+    <!-- Componentes -->
     <script src="components/Header.js" type="text/babel"></script>
     <script src="components/ServiceSelection.js" type="text/babel"></script>
+    <script src="components/ServiceSelectionTabs.js" type="text/babel"></script>
+    <script src="components/ServiceSelectionCategorias.js" type="text/babel"></script>
     <script src="components/ProfesionalSelector.js" type="text/babel"></script>
+    <script src="components/MultiProfesionalSelector.js" type="text/babel"></script>
     <script src="components/Calendar.js" type="text/babel"></script>
     <script src="components/TimeSlots.js" type="text/babel"></script>
+    <script src="components/MultiTimeSlots.js" type="text/babel"></script>
     <script src="components/BookingForm.js" type="text/babel"></script>
     <script src="components/Confirmation.js" type="text/babel"></script>
     <script src="components/WelcomeScreen.js" type="text/babel"></script>
@@ -72,9 +91,12 @@
     <script src="components/ClientAuthScreen.js" type="text/babel"></script>
     <script src="components/MyBookings.js" type="text/babel"></script>
     <script src="components/InstallButton.js" type="text/babel"></script>
+    
+    <!-- App de clientes -->
     <script src="client-app.js" type="text/babel"></script>
-
+    
     <script>
+        // Actualizar título dinámico desde la base de datos
         (async function() {
             try {
                 const nombre = await window.getNombreNegocio();
@@ -83,26 +105,28 @@
                     document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', nombre.split(' ')[0] || 'Gretel Nails');
                 }
             } catch (error) {
-                console.error('Error cargando titulo:', error);
+                console.error('Error cargando título:', error);
             }
         })();
     </script>
-
+    
     <script>
+        // Forzar prompt de instalación PWA
         window.addEventListener('load', () => {
             if (window.matchMedia('(display-mode: standalone)').matches) {
-                console.log('App ya instalada');
+                console.log('📱 📱 App ya instalada');
                 return;
             }
 
             let deferredPrompt;
+            
             window.addEventListener('beforeinstallprompt', (e) => {
                 e.preventDefault();
                 deferredPrompt = e;
-                console.log('beforeinstallprompt listo');
-
+                console.log('✅ ✅ beforeinstallprompt listo');
+                
                 const btn = document.createElement('button');
-                btn.innerText = 'INSTALAR APP';
+                btn.innerText = '📲 📱 INSTALAR APP';
                 btn.style.position = 'fixed';
                 btn.style.bottom = '20px';
                 btn.style.right = '20px';
@@ -115,20 +139,22 @@
                 btn.style.fontWeight = 'bold';
                 btn.style.boxShadow = '0 4px 15px rgba(0,0,0,0.3)';
                 btn.style.cursor = 'pointer';
+                
                 btn.onclick = async () => {
                     deferredPrompt.prompt();
                     const { outcome } = await deferredPrompt.userChoice;
-                    console.log(`Usuario: ${outcome}`);
+                    console.log(`✅ ✅ Usuario: ${outcome}`);
                     deferredPrompt = null;
                     btn.remove();
                 };
+                
                 document.body.appendChild(btn);
             });
 
             setTimeout(() => {
                 if (!deferredPrompt && !window.matchMedia('(display-mode: standalone)').matches) {
                     const msg = document.createElement('div');
-                    msg.innerHTML = 'Para instalar: menu 3 puntos -> Instalar aplicacion';
+                    msg.innerHTML = '📱 📱 Para instalar: menú 3 puntos → "Instalar aplicación"';
                     msg.style.position = 'fixed';
                     msg.style.bottom = '20px';
                     msg.style.left = '20px';
@@ -139,6 +165,7 @@
                     msg.style.fontSize = '14px';
                     msg.style.zIndex = '9999';
                     document.body.appendChild(msg);
+                    
                     setTimeout(() => msg.remove(), 8000);
                 }
             }, 5000);
