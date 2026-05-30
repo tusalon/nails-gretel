@@ -1,6 +1,6 @@
 // sw.js - Service Worker para Nails Gretel
 
-const CACHE_NAME = 'nails-gretel-v29';
+const CACHE_NAME = 'nails-gretel-v40';
 const urlsToCache = [
   '/nails-gretel/',
   '/nails-gretel/index.html',
@@ -17,7 +17,14 @@ const urlsToCache = [
   '/nails-gretel/icons/icon-152x152.png',
   '/nails-gretel/icons/icon-192x192.png',
   '/nails-gretel/icons/icon-384x384.png',
-  '/nails-gretel/icons/icon-512x512.png'
+  '/nails-gretel/icons/icon-512x512.png',
+  '/nails-gretel/vendor/react.production.min.js',
+  '/nails-gretel/vendor/react-dom.production.min.js',
+  '/nails-gretel/vendor/babel.min.js',
+  '/nails-gretel/vendor/bcrypt.min.js',
+  '/nails-gretel/vendor/tailwind-browser.js',
+  '/nails-gretel/vendor/lucide/lucide.css',
+  '/nails-gretel/vendor/lucide/lucide.woff2'
 ];
 
 // ============================================
