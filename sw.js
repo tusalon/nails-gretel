@@ -1,6 +1,6 @@
 // sw.js - Service Worker para Nails Gretel
 
-const CACHE_NAME = 'nails-gretel-v42';
+const CACHE_NAME = 'nails-gretel-v43';
 const urlsToCache = [
   '/nails-gretel/',
   '/nails-gretel/index.html',
