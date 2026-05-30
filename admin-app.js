@@ -448,6 +448,7 @@ function AdminApp() {
     const [clientesRegistrados, setClientesRegistrados] = React.useState([]);
     const [errorClientes, setErrorClientes] = React.useState('');
     const [cargandoClientes, setCargandoClientes] = React.useState(false);
+    const [importandoClientesCsv, setImportandoClientesCsv] = React.useState(false);
     const [clientesBloqueados, setClientesBloqueados] = React.useState([]);
     const [cargandoBloqueados, setCargandoBloqueados] = React.useState(false);
     const [nuevoBloqueo, setNuevoBloqueo] = React.useState({ nombre: '', whatsapp: '', codigo_pais: '53', motivo: '' });
@@ -1430,6 +1431,61 @@ function AdminApp() {
 
     const canvasToBlob = (canvas) => new Promise(resolve => canvas.toBlob(resolve, 'image/png', 0.95));
 
+    const blobToBase64 = (blob) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(String(reader.result || '').split(',')[1] || '');
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+
+    const compartirImagenDesdeCanvas = async (canvas, fileName, title, text) => {
+        const blob = await canvasToBlob(canvas);
+        if (!blob) return false;
+
+        const capacitor = window.Capacitor;
+        const plugins = capacitor?.Plugins || {};
+        const Filesystem = plugins.Filesystem;
+        const Share = plugins.Share;
+        const Directory = Filesystem?.Directory || window.Capacitor?.FilesystemDirectory;
+
+        if (Filesystem?.writeFile && Share?.share) {
+            try {
+                const data = await blobToBase64(blob);
+                const saved = await Filesystem.writeFile({
+                    path: fileName,
+                    data,
+                    directory: Directory?.Cache || 'CACHE',
+                    recursive: true
+                });
+                await Share.share({
+                    title,
+                    text,
+                    files: [saved.uri]
+                });
+                return true;
+            } catch (error) {
+                console.warn('No se pudo compartir con Capacitor, usando fallback:', error);
+            }
+        }
+
+        const file = new File([blob], fileName, { type: 'image/png' });
+        if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+            await navigator.share({ title, text, files: [file] });
+            return true;
+        }
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        return false;
+    };
+
     const dibujarTextoCentrado = (ctx, texto, x, y, maxWidth, lineHeight) => {
         const palabras = String(texto || '').split(' ');
         const lineas = [];
@@ -1584,29 +1640,13 @@ function AdminApp() {
         try {
             if (!disponibilidadSemanal.length) return;
             const canvas = await generarImagenDisponibilidadSemanal();
-            const blob = await canvasToBlob(canvas);
-            if (!blob) {
-                compartirDisponibilidadSemanalTexto();
-                return;
-            }
-
-            const file = new File([blob], `disponibilidad-${nombreNegocio || 'salon'}.png`, { type: 'image/png' });
-            if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
-                await navigator.share({
-                    title: `Disponibilidad semanal - ${nombreNegocio}`,
-                    text: `Disponibilidad semanal de ${nombreNegocio}`,
-                    files: [file]
-                });
-                return;
-            }
-
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = file.name;
-            link.target = '_blank';
-            link.click();
-            setTimeout(() => URL.revokeObjectURL(url), 60000);
+            const compartido = await compartirImagenDesdeCanvas(
+                canvas,
+                `disponibilidad-${nombreNegocio || 'salon'}.png`,
+                `Disponibilidad semanal - ${nombreNegocio}`,
+                `Disponibilidad semanal de ${nombreNegocio}`
+            );
+            if (!compartido) alert('Imagen generada. Si no se abrio el menu de compartir, revisa Descargas.');
         } catch (error) {
             console.error('Error generando imagen de disponibilidad:', error);
             compartirDisponibilidadSemanalTexto();
@@ -1770,26 +1810,13 @@ function AdminApp() {
     const compartirDisponibilidadMensual = async () => {
         try {
             const canvas = await generarImagenDisponibilidadMensual();
-            const blob = await canvasToBlob(canvas);
-            if (!blob) return;
-
-            const file = new File([blob], `disponibilidad-mensual-${nombreNegocio || 'salon'}.png`, { type: 'image/png' });
-            if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
-                await navigator.share({
-                    title: `Disponibilidad mensual - ${nombreNegocio}`,
-                    text: `Disponibilidad mensual de ${nombreNegocio}`,
-                    files: [file]
-                });
-                return;
-            }
-
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = file.name;
-            link.target = '_blank';
-            link.click();
-            setTimeout(() => URL.revokeObjectURL(url), 60000);
+            const compartido = await compartirImagenDesdeCanvas(
+                canvas,
+                `disponibilidad-mensual-${nombreNegocio || 'salon'}.png`,
+                `Disponibilidad mensual - ${nombreNegocio}`,
+                `Disponibilidad mensual de ${nombreNegocio}`
+            );
+            if (!compartido) alert('Imagen mensual generada. Si no se abrio el menu de compartir, revisa Descargas.');
         } catch (error) {
             console.error('Error generando imagen mensual:', error);
             alert('No se pudo generar la imagen mensual.');
@@ -2013,6 +2040,87 @@ function AdminApp() {
     // ============================================
     // FUNCIONES DE CLIENTES
     // ============================================
+
+    const parseCsvLine = (linea, separador = ',') => {
+        const valores = [];
+        let actual = '';
+        let entreComillas = false;
+        for (let i = 0; i < linea.length; i++) {
+            const char = linea[i];
+            const siguiente = linea[i + 1];
+            if (char === '"' && entreComillas && siguiente === '"') {
+                actual += '"';
+                i++;
+            } else if (char === '"') {
+                entreComillas = !entreComillas;
+            } else if (char === separador && !entreComillas) {
+                valores.push(actual.trim());
+                actual = '';
+            } else {
+                actual += char;
+            }
+        }
+        valores.push(actual.trim());
+        return valores;
+    };
+
+    const parseClientesCsv = (texto) => {
+        const lineas = String(texto || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        if (lineas.length === 0) return [];
+
+        const separador = (lineas[0].match(/;/g) || []).length > (lineas[0].match(/,/g) || []).length ? ';' : ',';
+        const primera = parseCsvLine(lineas[0], separador).map(h => h.toLowerCase().replace(/\s+/g, '_'));
+        const tieneHeader = primera.some(h => ['nombre', 'name', 'whatsapp', 'telefono', 'phone', 'celular'].includes(h));
+        const headers = tieneHeader ? primera : ['nombre', 'whatsapp'];
+        const datos = tieneHeader ? lineas.slice(1) : lineas;
+
+        const idxNombre = Math.max(headers.indexOf('nombre'), headers.indexOf('name'));
+        const idxWhatsapp = ['whatsapp', 'telefono', 'phone', 'celular', 'numero'].map(h => headers.indexOf(h)).find(i => i >= 0);
+
+        return datos.map(linea => {
+            const valores = parseCsvLine(linea, separador);
+            const nombre = valores[idxNombre >= 0 ? idxNombre : 0] || '';
+            const whatsapp = valores[idxWhatsapp >= 0 ? idxWhatsapp : 1] || '';
+            return { nombre: nombre.trim(), whatsapp: whatsapp.trim() };
+        }).filter(cliente => cliente.nombre && cliente.whatsapp);
+    };
+
+    const handleImportarClientesCsv = async (event) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+        if (!puedeGestionarReservas && userRole !== 'admin' && userNivel < 3) {
+            alert('No tienes permiso para importar clientes.');
+            return;
+        }
+
+        setImportandoClientesCsv(true);
+        try {
+            const texto = await file.text();
+            const clientes = parseClientesCsv(texto);
+            if (clientes.length === 0) {
+                alert('No se encontraron clientes validos. Usa columnas nombre,whatsapp.');
+                return;
+            }
+
+            let creados = 0;
+            let fallidos = 0;
+            for (const cliente of clientes) {
+                const whatsapp = normalizarTelefonoCompletoSeguro(cliente.whatsapp);
+                const creado = await window.crearCliente?.(cliente.nombre, whatsapp);
+                if (creado) creados++;
+                else fallidos++;
+            }
+
+            await loadClientesRegistrados();
+            alert(`CSV procesado. Clientes creados/actualizados: ${creados}. Fallidos: ${fallidos}.`);
+        } catch (error) {
+            console.error('Error importando CSV de clientes:', error);
+            alert('No se pudo importar el CSV. Revisa el formato.');
+        } finally {
+            setImportandoClientesCsv(false);
+        }
+    };
     
     const loadClientesRegistrados = async () => {
         console.log('Cargando clientes registrados...');
@@ -2774,10 +2882,11 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
     const agendaPxPerMinute = 1.2;
     const agendaGridHeight = 14 * 60 * agendaPxPerMinute;
     const agendaStatusStyle = {
-        Reservado: 'bg-pink-500 border-pink-600 text-white',
-        Pendiente: 'bg-amber-400 border-amber-500 text-amber-950',
-        Completado: 'bg-emerald-500 border-emerald-600 text-white',
-        Ausente: 'bg-slate-500 border-slate-600 text-white'
+        Reservado: 'bg-cyan-50 border-l-cyan-600 border-cyan-100 text-slate-900',
+        Pendiente: 'bg-amber-50 border-l-amber-500 border-amber-100 text-amber-950',
+        Completado: 'bg-emerald-50 border-l-emerald-600 border-emerald-100 text-emerald-950',
+        Ausente: 'bg-slate-100 border-l-slate-500 border-slate-200 text-slate-800',
+        Cancelado: 'bg-red-50 border-l-red-500 border-red-100 text-red-900'
     };
     const estadoNormalizado = (estado) => String(estado || '').trim().toLowerCase();
     const puedeEditarReserva = (booking) => {
@@ -2932,6 +3041,46 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
             return agendaDate.toLocaleDateString('es-CU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
         }
         return `${agendaDays[0].toLocaleDateString('es-CU', { day: 'numeric', month: 'short' })} - ${agendaDays[6].toLocaleDateString('es-CU', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+    };
+
+    const getAgendaServicios = (booking) => {
+        const reservasGrupo = booking?._reservasGrupo || [];
+        return reservasGrupo.length > 0 ? reservasGrupo : [booking].filter(Boolean);
+    };
+
+    const getPrecioServicioAgenda = (nombreServicio) => {
+        const servicio = serviciosList.find(item => item.nombre === nombreServicio);
+        return Number(servicio?.precio || 0);
+    };
+
+    const getAgendaResumenCobro = (booking) => {
+        const reservas = getAgendaServicios(booking);
+        const costoServicios = reservas.reduce((total, reserva) => total + getPrecioServicioAgenda(reserva.servicio), 0);
+        const cobroReal = reservas.reduce((total, reserva) => total + Number(reserva.monto_cobrado || 0), 0);
+        const requiereAnticipo = config?.requiere_anticipo === true || booking?.estado === 'Pendiente' || booking?.requiere_anticipo || booking?.requiereAnticipo || booking?.anticipo_recibido;
+        const valorAnticipo = Number(config?.valor_anticipo ?? config?.monto_anticipo ?? 0);
+        const anticipoCalculado = config?.tipo_anticipo === 'porcentaje'
+            ? Math.round(costoServicios * (valorAnticipo / 100))
+            : valorAnticipo;
+        const anticipo = requiereAnticipo ? anticipoCalculado : 0;
+        const totalMostrar = cobroReal > 0 ? cobroReal : costoServicios;
+        return {
+            costoServicios,
+            cobroReal,
+            anticipo,
+            requiereAnticipo,
+            tipoAnticipo: config?.tipo_anticipo || 'fijo',
+            valorAnticipo,
+            totalMostrar,
+            pendiente: Math.max(0, totalMostrar - anticipo)
+        };
+    };
+
+    const getAgendaEstadoPago = (booking) => {
+        const resumen = getAgendaResumenCobro(booking);
+        if (booking?.estado === 'Pendiente') return 'Anticipo pendiente';
+        if (resumen.requiereAnticipo) return `Anticipo requerido ${formatMoneyEstadistica(resumen.anticipo)}`;
+        return 'Sin anticipo';
     };
 
     const parseMontoEstadistica = (value) => {
@@ -3628,7 +3777,7 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                                     )}
                                     {!reservaEditando && serviciosManualSeleccionados.length > 0 && (
                                         <p className="text-xs text-pink-600 mt-2">
-                                            {serviciosManualSeleccionados.length} servicio{serviciosManualSeleccionados.length === 1 ? '' : 's'} ¬∑ {getServiciosManualSeleccionados().reduce((total, s) => total + Number(s.duracion || 60), 0)} min
+                                            {serviciosManualSeleccionados.length} servicio{serviciosManualSeleccionados.length === 1 ? '' : 's'} - {getServiciosManualSeleccionados().reduce((total, s) => total + Number(s.duracion || 60), 0)} min
                                         </p>
                                     )}
                                 </div>
@@ -3768,71 +3917,93 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                     </div>
                 )}
 
-                {agendaDetalleBooking && (
-                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                        <div className="bg-white rounded-xl max-w-lg w-full p-5 shadow-xl">
-                            <div className="flex items-start justify-between gap-4 border-b pb-3">
-                                <div>
-                                    <p className="text-xs uppercase tracking-wide text-pink-500 font-bold">Detalle de cita</p>
-                                    <h3 className="text-xl font-bold text-gray-900">{agendaDetalleBooking.cliente_nombre || 'Cliente sin nombre'}</h3>
-                                </div>
-                                <button onClick={() => setAgendaDetalleBooking(null)} className="text-gray-500 hover:text-gray-700 text-2xl leading-none">√ó</button>
+                {agendaDetalleBooking && (() => {
+                    const resumen = getAgendaResumenCobro(agendaDetalleBooking);
+                    const serviciosDetalle = getAgendaServicios(agendaDetalleBooking);
+                    const horaFinDetalle = agendaDetalleBooking.hora_fin || calculateEndTime(agendaDetalleBooking.hora_inicio, agendaDetalleBooking.duracion || 60);
+                    const duracionDetalle = Math.max(0, timeToMinutes(horaFinDetalle) - timeToMinutes(agendaDetalleBooking.hora_inicio));
+                    const estadoClase = agendaDetalleBooking.estado === 'Pendiente'
+                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                        : agendaDetalleBooking.estado === 'Completado'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : agendaDetalleBooking.estado === 'Ausente'
+                                ? 'bg-slate-100 text-slate-700 border-slate-200'
+                                : agendaDetalleBooking.estado === 'Cancelado'
+                                    ? 'bg-red-50 text-red-700 border-red-200'
+                                    : 'bg-cyan-50 text-cyan-700 border-cyan-200';
+
+                    return (
+                    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 sm:p-4">
+                        <div className="bg-white w-full sm:max-w-xl max-h-[96vh] overflow-y-auto rounded-t-3xl sm:rounded-2xl shadow-2xl">
+                            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b px-5 py-4 flex items-center justify-between">
+                                <button onClick={() => setAgendaDetalleBooking(null)} className="w-10 h-10 rounded-full hover:bg-gray-100 text-2xl leading-none">x</button>
+                                <h3 className="text-xl font-bold text-gray-900">Cita</h3>
+                                {puedeEditarReserva(agendaDetalleBooking) ? (
+                                    <button onClick={() => abrirModalReprogramar(agendaDetalleBooking)} className="w-16 h-10 rounded-full hover:bg-gray-100 text-sm font-bold">Editar</button>
+                                ) : <span className="w-10"></span>}
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 py-4 text-sm">
-                                <div className="rounded-lg bg-gray-50 p-3">
-                                    <p className="text-xs font-bold uppercase text-gray-400">Fecha</p>
-                                    <p className="font-semibold text-gray-900">{agendaDetalleBooking.fecha}</p>
-                                </div>
-                                <div className="rounded-lg bg-gray-50 p-3">
-                                    <p className="text-xs font-bold uppercase text-gray-400">Hora</p>
-                                    <p className="font-semibold text-gray-900">
-                                        {formatTo12Hour(agendaDetalleBooking.hora_inicio)} - {formatTo12Hour(agendaDetalleBooking.hora_fin || calculateEndTime(agendaDetalleBooking.hora_inicio, agendaDetalleBooking.duracion || 60))}
-                                    </p>
-                                </div>
-                                <div className="rounded-lg bg-gray-50 p-3">
-                                    <p className="text-xs font-bold uppercase text-gray-400">Servicio</p>
-                                    <p className="font-semibold text-gray-900">{agendaDetalleBooking.servicio}</p>
-                                </div>
-                                <div className="rounded-lg bg-gray-50 p-3">
-                                    <p className="text-xs font-bold uppercase text-gray-400">Profesional</p>
-                                    <p className="font-semibold text-gray-900">{agendaDetalleBooking.profesional_nombre || agendaDetalleBooking.trabajador_nombre || 'Sin profesional'}</p>
-                                </div>
-                                <div className="rounded-lg bg-gray-50 p-3">
-                                    <p className="text-xs font-bold uppercase text-gray-400">Estado</p>
-                                    <p className="font-semibold text-gray-900">{agendaDetalleBooking.estado || 'Sin estado'}</p>
-                                </div>
-                                <div className="rounded-lg bg-gray-50 p-3">
-                                    <p className="text-xs font-bold uppercase text-gray-400">WhatsApp</p>
-                                    <p className="font-semibold text-gray-900">+{agendaDetalleBooking.cliente_whatsapp || 'Sin numero'}</p>
-                                </div>
-                            </div>
-
-                            {agendaDetalleBooking._grupoVisual && Array.isArray(agendaDetalleBooking._reservasGrupo) && (
-                                <div className="mb-4 rounded-lg border border-pink-100 bg-pink-50 p-3">
-                                    <p className="text-xs font-bold uppercase text-pink-500 mb-2">Servicios del turno</p>
-                                    <div className="space-y-2">
-                                        {agendaDetalleBooking._reservasGrupo.map(item => (
-                                            <div key={item.id} className="flex justify-between gap-3 text-sm">
-                                                <span className="font-semibold text-gray-800">{item.servicio}</span>
-                                                <span className="text-gray-500">{formatTo12Hour(item.hora_inicio)} - {formatTo12Hour(item.hora_fin)}</span>
-                                            </div>
-                                        ))}
+                            <div className="px-5 py-5">
+                                <div className="mb-5">
+                                    <h2 className="text-2xl font-extrabold leading-tight text-gray-950">{agendaDetalleBooking.servicio || 'Servicio'}</h2>
+                                    <p className="mt-2 text-xl font-bold text-gray-900">Total: {formatMoneyEstadistica(resumen.totalMostrar)}</p>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${estadoClase}`}>{agendaDetalleBooking.estado || 'Sin estado'}</span>
+                                        <span className="inline-flex rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-bold text-green-700">{getAgendaEstadoPago(agendaDetalleBooking)}</span>
                                     </div>
                                 </div>
-                            )}
 
-                            <div className="flex gap-3">
-                                <button onClick={() => setAgendaDetalleBooking(null)} className="flex-1 px-4 py-2 border rounded-lg">Cerrar</button>
-                                {puedeEditarReserva(agendaDetalleBooking) && (
-                                    <button onClick={() => abrirModalReprogramar(agendaDetalleBooking)} className="flex-1 px-4 py-2 bg-pink-500 text-white rounded-lg font-bold hover:bg-pink-600">
-                                        Editar
-                                    </button>
+                                <div className="mb-5 space-y-1 text-gray-700">
+                                    <p className="font-semibold">{window.formatFechaCompleta ? window.formatFechaCompleta(agendaDetalleBooking.fecha) : agendaDetalleBooking.fecha}</p>
+                                    <p>de {formatTo12Hour(agendaDetalleBooking.hora_inicio)} a {formatTo12Hour(horaFinDetalle)} ({duracionDetalle} min)</p>
+                                    <p className="font-semibold">{agendaDetalleBooking.profesional_nombre || agendaDetalleBooking.trabajador_nombre || 'Sin profesional'}</p>
+                                    {config?.direccion && <p className="text-sm text-gray-500">{config.direccion}</p>}
+                                </div>
+
+                                <div className="divide-y rounded-xl border bg-white">
+                                    <div className="flex items-center justify-between p-4"><span className="font-semibold text-gray-800">Cliente</span><span className="text-right text-gray-600">{agendaDetalleBooking.cliente_nombre || 'Sin nombre'} &gt;</span></div>
+                                    <div className="flex items-center justify-between p-4"><span className="font-semibold text-gray-800">WhatsApp</span><button onClick={() => window.enviarWhatsApp?.(agendaDetalleBooking.cliente_whatsapp, `Hola ${agendaDetalleBooking.cliente_nombre || ''}`)} className="text-right text-pink-600 font-semibold">+{agendaDetalleBooking.cliente_whatsapp || 'Sin numero'} &gt;</button></div>
+                                    <div className="flex items-center justify-between p-4"><span className="font-semibold text-gray-800">Precio del servicio</span><span className="font-bold text-gray-900">{formatMoneyEstadistica(resumen.costoServicios)}</span></div>
+                                    <div className="flex items-center justify-between p-4"><span className="font-semibold text-gray-800">Anticipo requerido</span><span className={`font-bold ${resumen.requiereAnticipo ? 'text-amber-700' : 'text-gray-500'}`}>{resumen.requiereAnticipo ? 'Si' : 'No'}</span></div>
+                                    {resumen.requiereAnticipo && <div className="flex items-center justify-between p-4"><div><p className="font-semibold text-gray-800">Monto del anticipo</p><p className="text-sm text-gray-500">{resumen.tipoAnticipo === 'porcentaje' ? `${resumen.valorAnticipo}% del servicio` : 'Monto fijo'}</p></div><span className="font-bold text-amber-700">{formatMoneyEstadistica(resumen.anticipo)}</span></div>}
+                                    <div className="flex items-center justify-between p-4"><span className="font-semibold text-gray-800">Coste de servicios</span><span className="text-gray-600">{formatMoneyEstadistica(resumen.costoServicios)}</span></div>
+                                    <div className="flex items-center justify-between p-4"><span className="font-semibold text-gray-800">Descuento</span><span className="text-gray-600">No</span></div>
+                                    <div className="flex items-center justify-between p-4"><span className="font-semibold text-gray-800">Coste total</span><span className="text-gray-600">{formatMoneyEstadistica(resumen.totalMostrar)}</span></div>
+                                    <div className="flex items-center justify-between p-4"><div><p className="font-semibold text-gray-800">Deposito</p><p className="text-sm text-gray-500">{resumen.requiereAnticipo ? (agendaDetalleBooking.estado === 'Pendiente' ? 'Pendiente de recibir' : 'Aplica para esta cita') : 'No aplica'}</p></div><span className="text-gray-600">{formatMoneyEstadistica(resumen.anticipo)}</span></div>
+                                    <div className="flex items-center justify-between p-4"><span className="font-semibold text-gray-800">Total pendiente</span><span className="font-bold text-gray-900">{formatMoneyEstadistica(resumen.pendiente)}</span></div>
+                                    <div className="flex items-center justify-between p-4"><span className="font-semibold text-gray-800">Cobro real</span><span className="font-bold text-emerald-700">{resumen.cobroReal > 0 ? formatMoneyEstadistica(resumen.cobroReal) : 'Sin registrar'}</span></div>
+                                </div>
+
+                                {serviciosDetalle.length > 1 && (
+                                    <div className="mt-5 rounded-xl border border-pink-100 bg-pink-50 p-4">
+                                        <p className="text-xs font-bold uppercase text-pink-500 mb-3">Servicios del turno</p>
+                                        <div className="space-y-2">
+                                            {serviciosDetalle.map(item => (
+                                                <div key={item.id} className="flex justify-between gap-3 text-sm">
+                                                    <span className="font-semibold text-gray-800">{item.servicio}</span>
+                                                    <span className="text-gray-500">{formatTo12Hour(item.hora_inicio)} - {formatTo12Hour(item.hora_fin || calculateEndTime(item.hora_inicio, item.duracion || 60))}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
                                 )}
+
+                                <div className="mt-5 rounded-xl border bg-gray-50 p-4">
+                                    <p className="font-bold text-gray-900 mb-3">Acciones</p>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {agendaDetalleBooking.estado === 'Pendiente' && puedeGestionarReservas && <button onClick={() => confirmarPago(agendaDetalleBooking.id, agendaDetalleBooking)} className="px-3 py-2 rounded-lg bg-green-600 text-white font-bold text-sm">Confirmar pago</button>}
+                                        {puedeEditarReserva(agendaDetalleBooking) && <button onClick={() => abrirModalReprogramar(agendaDetalleBooking)} className="px-3 py-2 rounded-lg bg-pink-500 text-white font-bold text-sm">Editar</button>}
+                                        {turnoYaPaso(agendaDetalleBooking) && agendaDetalleBooking.estado !== 'Ausente' && puedeGestionarReservas && <button onClick={() => marcarAusencia(agendaDetalleBooking)} className="px-3 py-2 rounded-lg bg-slate-700 text-white font-bold text-sm">Ausencia</button>}
+                                        {agendaDetalleBooking.estado === 'Completado' && puedeGestionarReservas && <button onClick={() => abrirModalCobro(agendaDetalleBooking)} className="px-3 py-2 rounded-lg bg-emerald-600 text-white font-bold text-sm">Cobro real</button>}
+                                        {puedeEditarReserva(agendaDetalleBooking) && <button onClick={() => handleCancel(agendaDetalleBooking.id, agendaDetalleBooking)} className="px-3 py-2 rounded-lg bg-red-500 text-white font-bold text-sm">Cancelar</button>}
+                                        {puedeGestionarAvanzado && ['Cancelado', 'Completado', 'Ausente'].includes(agendaDetalleBooking.estado) && <button onClick={() => eliminarReservaHistorial(agendaDetalleBooking)} className="px-3 py-2 rounded-lg bg-gray-900 text-white font-bold text-sm">Eliminar</button>}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
-                )}
+                    );
+                })()}
 
                 {/* MODAL CALENDARIO DE DISPONIBILIDAD */}
                 {showDisponibilidadModal && (
@@ -4031,9 +4202,17 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-5">
                             <h2 className="text-xl font-bold">Clientes Registrados ({clientesRegistrados.length})</h2>
                             <p className="text-sm text-gray-500">Score calculado con el historial de reservas, completadas y canceladas.</p>
-                            <button onClick={() => { setShowClientesRegistrados(!showClientesRegistrados); if (!showClientesRegistrados) { loadClientesRegistrados(); loadClientesBloqueados(); } }} className="px-4 py-2 rounded-lg bg-pink-50 text-pink-600 text-sm font-medium hover:bg-pink-100">
-                                {showClientesRegistrados ? 'üôà Ocultar' : 'üëÅÔ∏è Mostrar'}
-                            </button>
+                            <div className="flex flex-wrap gap-2">
+                                {(userRole === 'admin' || userNivel >= 3) && (
+                                    <label className={`px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-bold hover:bg-black cursor-pointer ${importandoClientesCsv ? 'opacity-60 pointer-events-none' : ''}`}>
+                                        {importandoClientesCsv ? 'Importando...' : 'Cargar CSV'}
+                                        <input type="file" accept=".csv,text/csv" onChange={handleImportarClientesCsv} className="hidden" disabled={importandoClientesCsv} />
+                                    </label>
+                                )}
+                                <button onClick={() => { setShowClientesRegistrados(!showClientesRegistrados); if (!showClientesRegistrados) { loadClientesRegistrados(); loadClientesBloqueados(); } }} className="px-4 py-2 rounded-lg bg-pink-50 text-pink-600 text-sm font-medium hover:bg-pink-100">
+                                    {showClientesRegistrados ? 'Ocultar' : 'Mostrar'}
+                                </button>
+                            </div>
                         </div>
                         {showClientesRegistrados && (
                             <div className="space-y-5 max-h-[42rem] overflow-y-auto pr-1">
@@ -4233,12 +4412,12 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                                         )}
 
                                         {agendaDayLayoutBookings.map(booking => {
-                                            const statusClass = agendaStatusStyle[booking.estado] || 'bg-gray-500 border-gray-600 text-white';
+                                            const statusClass = agendaStatusStyle[booking.estado] || 'bg-gray-50 border-l-gray-500 border-gray-100 text-gray-900';
                                             const isShort = getBookingHeight(booking) < 76;
                                             return (
                                                 <div
                                                     key={booking._grupoVisualId || booking.id}
-                                                    className={`absolute rounded-lg border shadow-sm ${isShort ? 'p-2' : 'p-3'} overflow-hidden cursor-pointer ${statusClass}`}
+                                                    className={`absolute rounded-xl border border-l-4 shadow-sm hover:shadow-md transition ${isShort ? 'p-2' : 'p-3'} overflow-hidden cursor-pointer ${statusClass}`}
                                                     style={getAgendaBookingStyle(booking)}
                                                     onClick={() => abrirDetalleAgenda(booking)}
                                                 >
@@ -4246,10 +4425,10 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                                                         <div className="min-w-0">
                                                             <p className="text-[11px] font-bold leading-tight opacity-90">{formatTo12Hour(booking.hora_inicio)} - {formatTo12Hour(booking.hora_fin || calculateEndTime(booking.hora_inicio, booking.duracion || 60))}</p>
                                                             {!isShort && <p className="text-sm font-bold truncate">{booking.cliente_nombre}</p>}
-                                                            {!isShort && <p className="text-xs truncate opacity-90">{booking._grupoVisual ? `${booking._reservasGrupo.length} servicios ¬∑ ${booking.servicio}` : booking.servicio}</p>}
+                                                            {!isShort && <p className="text-xs truncate opacity-90">{booking._grupoVisual ? `${booking._reservasGrupo.length} servicios - ${booking.servicio}` : booking.servicio}</p>}
                                                             {!isShort && <p className="text-[11px] truncate opacity-80">{booking.profesional_nombre || booking.trabajador_nombre || 'Sin profesional'}</p>}
                                                         </div>
-                                                        <button onClick={(event) => { event.stopPropagation(); abrirDetalleAgenda(booking); }} className="mt-auto w-full rounded-md py-1 text-[11px] bg-white/20 hover:bg-white/30 font-bold">
+                                                        <button onClick={(event) => { event.stopPropagation(); abrirDetalleAgenda(booking); }} className="mt-auto w-full rounded-md py-1 text-[11px] bg-white/80 hover:bg-white text-gray-700 font-bold">
                                                             Detalles
                                                         </button>
                                                     </div>
@@ -4307,12 +4486,12 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                                                 ))}
 
                                                 {dayLayoutBookings.map(booking => {
-                                                    const statusClass = agendaStatusStyle[booking.estado] || 'bg-gray-500 border-gray-600 text-white';
+                                                    const statusClass = agendaStatusStyle[booking.estado] || 'bg-gray-50 border-l-gray-500 border-gray-100 text-gray-900';
                                                     const isShort = getBookingHeight(booking) < 76;
                                                     return (
                                                         <div
                                                             key={booking._grupoVisualId || booking.id}
-                                                            className={`absolute rounded-lg border shadow-sm p-2 overflow-hidden cursor-pointer ${statusClass}`}
+                                                            className={`absolute rounded-xl border border-l-4 shadow-sm hover:shadow-md transition p-2 overflow-hidden cursor-pointer ${statusClass}`}
                                                             style={getAgendaBookingStyle(booking)}
                                                             title={`${booking.cliente_nombre} - ${booking._grupoVisual ? `${booking._reservasGrupo.length} servicios: ` : ''}${booking.servicio}`}
                                                             onClick={() => abrirDetalleAgenda(booking)}
@@ -4321,10 +4500,10 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                                                                 <div className="min-w-0">
                                                                     <p className="text-xs font-bold leading-tight">{formatTo12Hour(booking.hora_inicio)} - {formatTo12Hour(booking.hora_fin || calculateEndTime(booking.hora_inicio, booking.duracion || 60))}</p>
                                                                     {!isShort && <p className="font-bold text-sm truncate">{booking.cliente_nombre}</p>}
-                                                                    {!isShort && <p className="text-xs truncate opacity-90">{booking._grupoVisual ? `${booking._reservasGrupo.length} servicios ¬∑ ${booking.servicio}` : booking.servicio}</p>}
+                                                                    {!isShort && <p className="text-xs truncate opacity-90">{booking._grupoVisual ? `${booking._reservasGrupo.length} servicios - ${booking.servicio}` : booking.servicio}</p>}
                                                                     {!isShort && <p className="text-xs truncate opacity-80">{booking.profesional_nombre || booking.trabajador_nombre || 'Sin profesional'}</p>}
                                                                 </div>
-                                                                <button onClick={(event) => { event.stopPropagation(); abrirDetalleAgenda(booking); }} className="mt-auto w-full bg-white/20 hover:bg-white/30 rounded px-2 py-1 text-[11px] font-bold">
+                                                                <button onClick={(event) => { event.stopPropagation(); abrirDetalleAgenda(booking); }} className="mt-auto w-full bg-white/80 hover:bg-white text-gray-700 rounded px-2 py-1 text-[11px] font-bold">
                                                                     Detalles
                                                                 </button>
                                                             </div>
@@ -4455,7 +4634,7 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                                                         <p className="text-xs font-bold text-pink-700">Cita agrupada: {b._reservasGrupo.length} servicios consecutivos</p>
                                                         {b._reservasGrupo.map(item => (
                                                             <p key={item.id} className="text-xs text-gray-700">
-                                                                {formatTo12Hour(item.hora_inicio)} - {formatTo12Hour(item.hora_fin || calculateEndTime(item.hora_inicio, item.duracion || 60))} ¬∑ {item.servicio} ¬∑ {item.profesional_nombre || item.trabajador_nombre || 'Sin profesional'}
+                                                                {formatTo12Hour(item.hora_inicio)} - {formatTo12Hour(item.hora_fin || calculateEndTime(item.hora_inicio, item.duracion || 60))} - {item.servicio} - {item.profesional_nombre || item.trabajador_nombre || 'Sin profesional'}
                                                             </p>
                                                         ))}
                                                     </div>
