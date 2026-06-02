@@ -491,6 +491,7 @@ function AdminApp() {
     const [profesionalesManualFiltrados, setProfesionalesManualFiltrados] = React.useState([]);
     const [horariosDisponibles, setHorariosDisponibles] = React.useState([]);
     const [modoHorarioManualCompleto, setModoHorarioManualCompleto] = React.useState(false);
+    const [forzarHorarioManualAdmin, setForzarHorarioManualAdmin] = React.useState(false);
     const [currentDate, setCurrentDate] = React.useState(new Date());
     const [diasLaborales, setDiasLaborales] = React.useState([]);
     const [fechasConHorarios, setFechasConHorarios] = React.useState({});
@@ -817,7 +818,7 @@ function AdminApp() {
         const descansosDelDia = horarios.descansosPorDia?.[diaSemana] || [];
         const diaSinJornada = diasTrabajo.length > 0 && !diasTrabajo.includes(diaSemana);
         const sinHorasConfiguradas = horasTrabajo.length === 0;
-        const usarHorarioManualCompleto = adminPuedeForzarHorario && (fechaBloqueada || diaSinJornada || sinHorasConfiguradas);
+        const usarHorarioManualCompleto = adminPuedeForzarHorario && (forzarHorarioManualAdmin || fechaBloqueada || diaSinJornada || sinHorasConfiguradas);
 
         setModoHorarioManualCompleto(usarHorarioManualCompleto);
 
@@ -913,7 +914,7 @@ function AdminApp() {
         };
 
         cargarHorarios();
-    }, [nuevaReservaData.profesional_id, nuevaReservaData.fecha, nuevaReservaData.servicio, nuevaReservaData.duracion_personalizada, serviciosManualSeleccionados, serviciosList, reservaEditando]);
+    }, [nuevaReservaData.profesional_id, nuevaReservaData.fecha, nuevaReservaData.servicio, nuevaReservaData.duracion_personalizada, serviciosManualSeleccionados, serviciosList, reservaEditando, forzarHorarioManualAdmin]);
 
     // ============================================
     // FUNCIONES DE DISPONIBILIDAD
@@ -1357,8 +1358,9 @@ function AdminApp() {
     };
     
     const handleDateSelect = (date) => {
-        if (isDateAvailable(date)) {
+        if (isDateAvailable(date) || userRole === 'admin') {
             const fechaStr = formatDate(date);
+            setForzarHorarioManualAdmin(false);
             setNuevaReservaData({...nuevaReservaData, fecha: fechaStr, hora_inicio: ''});
         }
     };
@@ -3878,17 +3880,29 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                                                         const esCerrado = diasCerradosFechas.includes(fechaStr);
                                                         const esPasado = fechaStr < getCurrentLocalDate();
                                                         const adminPuedeForzarFecha = userRole === 'admin';
+                                                        const turnosNormales = Number(fechasConHorarios[fechaStr] || 0);
+                                                        const adminSinTurnosNormales = adminPuedeForzarFecha && !esPasado && turnosNormales <= 0;
                                                         const fechaDeshabilitada = esPasado || (!adminPuedeForzarFecha && (!available || esCerrado));
                                                         
-                                                        let className = "h-10 w-full rounded-lg text-sm font-medium";
+                                                        let className = "h-10 w-full rounded-lg text-sm font-medium relative";
                                                         if (selected) className += " bg-pink-500 text-white shadow-md";
                                                         else if (fechaDeshabilitada) className += " text-gray-300 cursor-not-allowed bg-gray-50 line-through";
-                                                        else if (adminPuedeForzarFecha && esCerrado) className += " text-amber-700 hover:bg-amber-50 cursor-pointer border border-amber-200";
+                                                        else if (adminSinTurnosNormales || esCerrado) className += " text-amber-800 bg-amber-50 hover:bg-amber-100 cursor-pointer border border-amber-200";
+                                                        else if (turnosNormales > 0) className += " text-emerald-700 bg-emerald-50 hover:bg-emerald-100 cursor-pointer border border-emerald-200";
                                                         else className += " text-gray-700 hover:bg-pink-50 cursor-pointer";
                                                         
                                                         return (
-                                                            <button key={idx} onClick={() => handleDateSelect(date)} disabled={fechaDeshabilitada} className={className} title={esCerrado ? "Dia cerrado, disponible para admin" : esPasado ? "Fecha pasada" : ""}>
+                                                            <button
+                                                                key={idx}
+                                                                onClick={() => handleDateSelect(date)}
+                                                                disabled={fechaDeshabilitada}
+                                                                className={className}
+                                                                title={esPasado ? "Fecha pasada" : adminSinTurnosNormales ? "Sin turnos normales; admin puede forzar horario" : turnosNormales > 0 ? `${turnosNormales} turno(s) disponible(s)` : ""}
+                                                            >
                                                                 {date.getDate()}
+                                                                {!selected && !fechaDeshabilitada && (
+                                                                    <span className={`absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full ${adminSinTurnosNormales ? 'bg-amber-500' : turnosNormales > 0 ? 'bg-emerald-500' : 'bg-gray-300'}`}></span>
+                                                                )}
                                                             </button>
                                                         );
                                                     })}
@@ -3900,9 +3914,38 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                                 {nuevaReservaData.fecha && (
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-2">Hora de inicio *</label>
+                                        {userRole === 'admin' && !modoHorarioManualCompleto && (
+                                            <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+                                                <p className="font-semibold">Disponibilidad normal del profesional.</p>
+                                                <p>Si no aparece la hora que necesitas, puedes abrir todas las horas libres del dia sin chocar con otra cita.</p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setForzarHorarioManualAdmin(true);
+                                                        setNuevaReservaData({...nuevaReservaData, hora_inicio: ''});
+                                                    }}
+                                                    className="mt-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white"
+                                                >
+                                                    Ver todas las horas libres del dia
+                                                </button>
+                                            </div>
+                                        )}
                                         {modoHorarioManualCompleto && horariosDisponibles.length > 0 && (
                                             <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                                                Modo admin: este dia no tiene horario normal para el profesional. Puedes elegir cualquier hora libre del dia, siempre que no choque con otra cita.
+                                                <p className="font-semibold">Modo admin: horario manual completo.</p>
+                                                <p>Estas viendo todas las horas libres del dia. El sistema sigue evitando choques con otras citas.</p>
+                                                {forzarHorarioManualAdmin && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setForzarHorarioManualAdmin(false);
+                                                            setNuevaReservaData({...nuevaReservaData, hora_inicio: ''});
+                                                        }}
+                                                        className="mt-2 rounded-lg bg-white px-3 py-2 text-xs font-bold text-amber-700 border border-amber-200"
+                                                    >
+                                                        Volver al horario normal
+                                                    </button>
+                                                )}
                                             </div>
                                         )}
                                         {horariosDisponibles.length > 0 ? (
@@ -3913,7 +3956,22 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                                                     </button>
                                                 ))}
                                             </div>
-                                        ) : <p className="text-sm text-gray-500">No hay horarios disponibles</p>}
+                                        ) : (
+                                            <div className="rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-700">
+                                                <p className="font-semibold">No hay horarios disponibles dentro de la agenda normal.</p>
+                                                {userRole === 'admin' ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setForzarHorarioManualAdmin(true)}
+                                                        className="mt-2 rounded-lg bg-red-600 px-3 py-2 text-xs font-bold text-white"
+                                                    >
+                                                        Buscar otra hora libre del dia
+                                                    </button>
+                                                ) : (
+                                                    <p>Prueba otra fecha o profesional.</p>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                                 <div className="flex gap-3 pt-4">

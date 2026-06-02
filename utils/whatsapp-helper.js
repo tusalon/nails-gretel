@@ -7,8 +7,11 @@ function generarLinkCalendarioCliente(booking) {
     if (!booking?.id) return '';
 
     const pathParts = window.location.pathname.split('/').filter(Boolean);
-    const basePath = pathParts.length >= 1 ? `/${pathParts[0]}/` : '/';
-    const calendarUrl = new URL('calendar.html', `${window.location.origin}${basePath}`);
+    const repoPath = pathParts.length >= 1 ? pathParts[0] : 'nails-gretel';
+    const origin = window.location.origin && window.location.origin !== 'null'
+        ? window.location.origin
+        : 'https://tusalon.github.io';
+    const calendarUrl = new URL(`/${repoPath}/calendar.html`, origin);
 
     calendarUrl.searchParams.set('id', booking.id);
     if (booking.negocio_id) {
@@ -20,7 +23,7 @@ function generarLinkCalendarioCliente(booking) {
 
 function generarLineaCalendarioCliente(booking) {
     const link = generarLinkCalendarioCliente(booking);
-    return link ? `\n📅 *Agregar a tu calendario:*\n${link}\n` : '';
+    return link ? `\nAgregar a tu calendario:\n${link}\n` : '';
 }
 
 async function getConfigNegocio() {
