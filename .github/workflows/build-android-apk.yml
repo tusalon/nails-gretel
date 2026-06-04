@@ -41,6 +41,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Restore Firebase config
+        shell: powershell
+        env:
+          ANDROID_GOOGLE_SERVICES_JSON: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON }}
+        run: |
+          if ($env:ANDROID_GOOGLE_SERVICES_JSON) {
+            $env:ANDROID_GOOGLE_SERVICES_JSON | Set-Content -Path android/app/google-services.json -Encoding UTF8
+            Write-Host "google-services.json restaurado desde GitHub Secrets"
+          } else {
+            Write-Host "ANDROID_GOOGLE_SERVICES_JSON no configurado; la APK compila sin Firebase push nativo"
+          }
+
       - name: Sync Capacitor Android
         run: npm run android:sync
 
@@ -52,7 +64,13 @@ jobs:
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path apk-output
-          Copy-Item android/app/build/outputs/apk/debug/app-debug.apk apk-output/nails-gretel-debug.apk
+          $apk = Get-ChildItem -Path android/app/build/outputs/apk -Recurse -Filter "*.apk" | Select-Object -First 1
+          if (-not $apk) {
+            Get-ChildItem -Path android/app/build -Recurse | Select-Object FullName
+            throw "No se encontro ningun APK generado"
+          }
+          Write-Host "APK encontrado: $($apk.FullName)"
+          Copy-Item $apk.FullName apk-output/nails-gretel-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
