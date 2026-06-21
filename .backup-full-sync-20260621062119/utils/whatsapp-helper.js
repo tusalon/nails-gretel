@@ -26,21 +26,13 @@ function generarLineaCalendarioCliente(booking) {
 async function getConfigNegocio() {
     try {
         const config = await window.cargarConfiguracionNegocio();
-        const preferenciasWhatsApp = window.getPreferenciasWhatsAppNegocio
-            ? window.getPreferenciasWhatsAppNegocio(config)
-            : {
-                moneda: ['CUP', 'USD'].includes(String(config?.whatsapp_moneda || '').toUpperCase()) ? String(config.whatsapp_moneda).toUpperCase() : 'CUP',
-                mostrarCostos: config?.whatsapp_mostrar_costos !== false
-            };
         return {
             ...(config || {}),
             nombre: config?.nombre || 'Mi Negocio',
             telefono: config?.telefono || '00000000',
             direccion: config?.direccion || config?.ubicacion || config?.direccion_negocio || config?.address || '',
             ubicacion: config?.ubicacion || config?.direccion || config?.direccion_negocio || config?.address || '',
-            ntfyTopic: config?.ntfy_topic || config?.ntfyTopic || 'notificaciones',
-            whatsapp_moneda: preferenciasWhatsApp.moneda,
-            whatsapp_mostrar_costos: preferenciasWhatsApp.mostrarCostos
+            ntfyTopic: config?.ntfy_topic || config?.ntfyTopic || 'notificaciones'
         };
     } catch (error) {
         console.error('Error obteniendo configuración:', error);
@@ -49,9 +41,7 @@ async function getConfigNegocio() {
             telefono: '00000000',
             direccion: '',
             ubicacion: '',
-            ntfyTopic: 'notificaciones',
-            whatsapp_moneda: 'CUP',
-            whatsapp_mostrar_costos: true
+            ntfyTopic: 'notificaciones'
         };
     }
 }
@@ -120,26 +110,8 @@ function formatearMontoReserva(monto, moneda = 'CUP') {
     return `${limpio} ${moneda}`;
 }
 
-function getPreferenciasWhatsApp(configNegocio = {}) {
-    if (window.getPreferenciasWhatsAppNegocio) {
-        return window.getPreferenciasWhatsAppNegocio(configNegocio);
-    }
-    const moneda = String(configNegocio?.whatsapp_moneda || 'CUP').toUpperCase();
-    return {
-        moneda: ['CUP', 'USD'].includes(moneda) ? moneda : 'CUP',
-        mostrarCostos: configNegocio?.whatsapp_mostrar_costos !== false
-    };
-}
-
-function formatearMontoWhatsApp(monto, configNegocio = {}) {
-    const preferencias = getPreferenciasWhatsApp(configNegocio);
-    return formatearMontoReserva(monto, preferencias.moneda);
-}
-
-function generarLineaTotalReserva(totalReserva, configNegocio = {}) {
-    const preferencias = getPreferenciasWhatsApp(configNegocio);
-    if (!preferencias.mostrarCostos) return '';
-    const totalFormateado = formatearMontoReserva(totalReserva, preferencias.moneda);
+function generarLineaTotalReserva(totalReserva) {
+    const totalFormateado = formatearMontoReserva(totalReserva);
     return totalFormateado ? `\n💵 *Total a pagar:* ${totalFormateado}` : '';
 }
 
@@ -308,15 +280,14 @@ window.enviarMensajePago = async function(booking, configNegocio) {
 
         const montoAnticipo = await calcularMontoAnticipo(configNegocio, booking.servicio);
         const totalReserva = await calcularTotalReserva(booking);
-        const lineaTotalReserva = generarLineaTotalReserva(totalReserva, configNegocio);
-        const totalPagar = formatearMontoWhatsApp(totalReserva, configNegocio);
-        const montoAnticipoFormateado = formatearMontoWhatsApp(montoAnticipo, configNegocio);
+        const lineaTotalReserva = generarLineaTotalReserva(totalReserva);
+        const totalPagar = formatearMontoReserva(totalReserva);
         const { fechaConDia, horaFormateada } = getFechaHora(booking);
         const profesional = getProfesional(booking);
         const lineaCalendario = generarLineaCalendarioCliente(booking);
         const lineaDireccion = generarLineaDireccion(configNegocio);
         const mensajePagoConfig = aplicarPlantillaPago(configNegocio, booking, {
-            montoAnticipo: montoAnticipoFormateado || montoAnticipo,
+            montoAnticipo,
             totalPagar,
             fechaConDia,
             horaFormateada,
@@ -336,7 +307,7 @@ ${lineaTotalReserva}
 ${lineaDireccion}
 
 ${mensajePagoConfig || `
-💰 *Para confirmar tu turno*, envía el *anticipo de ${montoAnticipoFormateado || montoAnticipo}* por:
+💰 *Para confirmar tu turno*, envía el *anticipo de ${montoAnticipo} CUP* por:
 
 🏦 *Transferencia bancaria:*
    Tarjeta a transferir: ${configNegocio.cbu || 'XXXX XXXX XXXX XXXX'}
@@ -376,7 +347,7 @@ window.enviarConfirmacionReserva = async function(booking, configNegocio) {
 
         const { fechaConDia, horaFormateada } = getFechaHora(booking);
         const totalReserva = await calcularTotalReserva(booking);
-        const lineaTotalReserva = generarLineaTotalReserva(totalReserva, configNegocio);
+        const lineaTotalReserva = generarLineaTotalReserva(totalReserva);
         const lineaCalendario = generarLineaCalendarioCliente(booking);
         const lineaDireccion = generarLineaDireccion(configNegocio);
 
@@ -417,7 +388,7 @@ window.enviarConfirmacionPago = async function(booking, configNegocio) {
 
         const { fechaConDia, horaFormateada } = getFechaHora(booking);
         const totalReserva = await calcularTotalReserva(booking);
-        const lineaTotalReserva = generarLineaTotalReserva(totalReserva, configNegocio);
+        const lineaTotalReserva = generarLineaTotalReserva(totalReserva);
         const nombreNegocio = configNegocio?.nombre || 'Mi Salón';
         const lineaCalendario = generarLineaCalendarioCliente(booking);
         const lineaDireccion = generarLineaDireccion(configNegocio);
@@ -498,7 +469,7 @@ window.notificarNuevaReserva = async function(booking) {
         const config = await getConfigNegocio();
         const { fechaConDia, horaFormateada } = getFechaHora(booking);
         const totalReserva = await calcularTotalReserva(booking);
-        const lineaTotalReserva = generarLineaTotalReserva(totalReserva, config);
+        const lineaTotalReserva = generarLineaTotalReserva(totalReserva);
         const profesional = getProfesional(booking);
         const lineaCalendario = generarLineaCalendarioCliente(booking);
         const lineaDireccion = generarLineaDireccion(config);
@@ -554,15 +525,14 @@ window.notificarReservaPendiente = async function(booking) {
         const configNegocio = await window.cargarConfiguracionNegocio();
         const montoAnticipo = await calcularMontoAnticipo(configNegocio, booking.servicio);
         const totalReserva = await calcularTotalReserva(booking);
-        const lineaTotalReserva = generarLineaTotalReserva(totalReserva, configNegocio);
-        const totalPagar = formatearMontoWhatsApp(totalReserva, configNegocio);
-        const montoAnticipoFormateado = formatearMontoWhatsApp(montoAnticipo, configNegocio);
+        const lineaTotalReserva = generarLineaTotalReserva(totalReserva);
+        const totalPagar = formatearMontoReserva(totalReserva);
         const { fechaConDia, horaFormateada } = getFechaHora(booking);
         const profesional = getProfesional(booking);
         const lineaCalendario = generarLineaCalendarioCliente(booking);
         const lineaDireccion = generarLineaDireccion(configNegocio);
         const mensajePagoConfig = aplicarPlantillaPago(configNegocio, booking, {
-            montoAnticipo: montoAnticipoFormateado || montoAnticipo,
+            montoAnticipo,
             totalPagar,
             fechaConDia,
             horaFormateada,
@@ -584,7 +554,7 @@ ${lineaTotalReserva}
 ${lineaDireccion}
 
 ${mensajePagoConfig || `
-💰 *Para confirmar tu turno*, envía el *anticipo de ${montoAnticipoFormateado || montoAnticipo}* por:
+💰 *Para confirmar tu turno*, envía el *anticipo de ${montoAnticipo} CUP* por:
 
 🏦 *Transferencia bancaria:*
    Tarjeta a transferir: ${configNegocio.cbu || 'XXXX XXXX XXXX XXXX'}
@@ -603,7 +573,7 @@ ${lineaCalendario}
 `🆕 RESERVA PENDIENTE - ${configNegocio.nombre}
 👤 Cliente: ${booking.cliente_nombre}
 💅 Servicio: ${booking.servicio}
-💰 Monto: ${montoAnticipoFormateado || formatearMontoReserva(montoAnticipo, getPreferenciasWhatsApp(configNegocio).moneda)}`;
+💰 Monto: $${montoAnticipo}`;
 
         await window.enviarNotificacionPush(
             `💰 ${configNegocio.nombre} - Pago pendiente`,

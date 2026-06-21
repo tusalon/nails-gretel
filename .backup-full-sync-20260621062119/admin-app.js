@@ -619,11 +619,6 @@ function AdminApp() {
 
     const limpiarTelefonoCliente = normalizarTelefonoLocalSeguro;
 
-    const inferirCodigoPaisCliente = (telefono, fallback = codigoPaisClienteManual) => {
-        const detectado = window.detectarPaisTelefono ? window.detectarPaisTelefono(telefono) : null;
-        return detectado?.codigo || fallback || codigoPaisNegocio;
-    };
-
     const clientesManualFiltrados = React.useMemo(() => {
         const queryTexto = normalizarBusquedaCliente(busquedaClienteManual);
         const queryNumero = String(busquedaClienteManual || '').replace(/\D/g, '');
@@ -645,15 +640,12 @@ function AdminApp() {
     }, [busquedaClienteManual, clientesRegistrados, config?.codigo_pais]);
 
     const seleccionarClienteManual = (cliente) => {
-        setNuevaReservaData(prev => {
-            const codigoCliente = inferirCodigoPaisCliente(cliente.whatsapp, prev.cliente_codigo_pais);
-            return {
-                ...prev,
-                cliente_nombre: cliente.nombre || '',
-                cliente_whatsapp: limpiarTelefonoCliente(cliente.whatsapp, codigoCliente),
-                cliente_codigo_pais: codigoCliente
-            };
-        });
+        setNuevaReservaData(prev => ({
+            ...prev,
+            cliente_nombre: cliente.nombre || '',
+            cliente_whatsapp: limpiarTelefonoCliente(cliente.whatsapp),
+            cliente_codigo_pais: window.normalizarTelefonoInternacional ? '' : prev.cliente_codigo_pais
+        }));
         setBusquedaClienteManual('');
     };
 
@@ -3881,7 +3873,7 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                                                 setNuevaReservaData({
                                                     ...nuevaReservaData,
                                                     cliente_codigo_pais: nuevoCodigo,
-                                                    cliente_whatsapp: String(nuevaReservaData.cliente_whatsapp || '').replace(/\D/g, '')
+                                                    cliente_whatsapp: normalizarTelefonoLocalSeguro(nuevaReservaData.cliente_whatsapp, nuevoCodigo)
                                                 });
                                             }}
                                             className="w-32 px-2 rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 text-sm"
@@ -3890,7 +3882,7 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                                                 <option key={pais.id} value={pais.codigo}>{pais.bandera} +{pais.codigo}</option>
                                             ))}
                                         </select>
-                                        <input type="tel" value={nuevaReservaData.cliente_whatsapp} onChange={(e) => setNuevaReservaData({...nuevaReservaData, cliente_whatsapp: String(e.target.value || '').replace(/\D/g, '')})} className="w-full px-4 py-2 rounded-r-lg border border-gray-300" placeholder={paisTelefono.ejemplo || '55002272'} />
+                                        <input type="tel" value={nuevaReservaData.cliente_whatsapp} onChange={(e) => setNuevaReservaData({...nuevaReservaData, cliente_whatsapp: normalizarTelefonoLocalSeguro(e.target.value, codigoPaisClienteManual)})} className="w-full px-4 py-2 rounded-r-lg border border-gray-300" placeholder={paisTelefono.ejemplo || '55002272'} />
                                     </div>
                                 </div>
                                 <div>
@@ -4420,7 +4412,7 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                                                     onChange={(e) => setNuevoBloqueo({
                                                         ...nuevoBloqueo,
                                                         codigo_pais: e.target.value,
-                                                        whatsapp: String(nuevoBloqueo.whatsapp || '').replace(/\D/g, '')
+                                                        whatsapp: normalizarTelefonoLocalSeguro(nuevoBloqueo.whatsapp, e.target.value)
                                                     })}
                                                     className="w-28 rounded-l-lg border border-r-0 px-2 py-2 text-sm bg-white"
                                                 >
@@ -4428,7 +4420,7 @@ Cualquier cambio, pod√©s cancelarlo desde la app con hasta 1 hora de anticipaci√
                                                         <option key={pais.id} value={pais.codigo}>{pais.bandera} +{pais.codigo}</option>
                                                     ))}
                                                 </select>
-                                                <input type="tel" value={nuevoBloqueo.whatsapp} onChange={(e) => setNuevoBloqueo({...nuevoBloqueo, whatsapp: String(e.target.value || '').replace(/\D/g, '')})} className="border rounded-r-lg px-3 py-2 text-sm" placeholder="WhatsApp" />
+                                                <input type="tel" value={nuevoBloqueo.whatsapp} onChange={(e) => setNuevoBloqueo({...nuevoBloqueo, whatsapp: normalizarTelefonoLocalSeguro(e.target.value, nuevoBloqueo.codigo_pais || codigoPaisNegocio)})} className="border rounded-r-lg px-3 py-2 text-sm" placeholder="WhatsApp" />
                                             </div>
                                             <input type="text" value={nuevoBloqueo.motivo} onChange={(e) => setNuevoBloqueo({...nuevoBloqueo, motivo: e.target.value})} className="border rounded-lg px-3 py-2 text-sm" placeholder="Motivo opcional" />
                                             <button onClick={() => handleBloquearCliente()} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-bold hover:bg-red-700">Bloquear</button>

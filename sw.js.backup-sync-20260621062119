@@ -1,6 +1,6 @@
 // sw.js - Service Worker para Nails Gretel
 
-const CACHE_NAME = 'nails-gretel-v59';
+const CACHE_NAME = 'nails-gretel-v56';
 const urlsToCache = [
   '/nails-gretel/',
   '/nails-gretel/index.html',
@@ -25,7 +25,6 @@ const urlsToCache = [
   '/nails-gretel/vendor/tailwind-browser.js',
   '/nails-gretel/vendor/lucide/lucide.css',
   '/nails-gretel/vendor/lucide/lucide.woff2',
-  '/nails-gretel/utils/legacy-ios-fallback.css?v=20260619-ios15',
   '/nails-gretel/utils/push-config.js',
   '/nails-gretel/utils/push-notifications.js'
 ];

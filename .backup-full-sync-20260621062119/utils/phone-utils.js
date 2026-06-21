@@ -62,11 +62,8 @@
         const digits = onlyDigits(value);
         if (!digits) return '';
 
-        const codigoExplicito = codigoPais !== null && codigoPais !== undefined && String(codigoPais).trim() !== '';
         const country = getCountryByCode(codigoPais || getCodigoPaisTelefono());
-        const longitudInternacionalEsperada = country.codigo.length + country.localLength;
-
-        if (!codigoExplicito && digits.startsWith(country.codigo) && digits.length >= longitudInternacionalEsperada) {
+        if (digits.startsWith(country.codigo) && digits.length > country.localLength) {
             return digits.slice(country.codigo.length);
         }
 
@@ -75,23 +72,10 @@
 
     function normalizarTelefonoInternacional(value, codigoPais = null) {
         const digits = onlyDigits(value);
-        const codigoExplicito = codigoPais !== null && codigoPais !== undefined && String(codigoPais).trim() !== '';
-
-        if (!codigoExplicito) {
-            const telefonoInternacional = detectarTelefonoInternacional(digits);
-            if (telefonoInternacional) return digits;
-        }
+        const telefonoInternacional = detectarTelefonoInternacional(digits);
+        if (telefonoInternacional) return digits;
 
         const country = getCountryByCode(codigoPais || getCodigoPaisTelefono());
-        if (codigoExplicito && digits.startsWith(country.codigo) && digits.length > country.localLength) {
-            return digits;
-        }
-
-        if (codigoExplicito) {
-            const otroPais = detectarTelefonoInternacional(digits);
-            if (otroPais && otroPais.codigo !== country.codigo) return digits;
-        }
-
         const local = normalizarTelefonoLocal(digits, country.codigo);
         return local ? `${country.codigo}${local}` : '';
     }
@@ -105,7 +89,6 @@
     window.PHONE_COUNTRIES = COUNTRIES;
     window.DEFAULT_PHONE_COUNTRY_CODE = DEFAULT_COUNTRY_CODE;
     window.onlyPhoneDigits = onlyDigits;
-    window.detectarPaisTelefono = (value) => detectarTelefonoInternacional(onlyDigits(value));
     window.getPhoneCountryConfig = (config = null) => getCountryByCode(getCodigoPaisTelefono(config));
     window.getCodigoPaisTelefono = getCodigoPaisTelefono;
     window.setCodigoPaisTelefono = setCodigoPaisTelefono;
