@@ -1,6 +1,6 @@
 // sw.js - Service Worker para Nails Gretel
 
-const CACHE_NAME = 'nails-gretel-v71';
+const CACHE_NAME = 'nails-gretel-v72';
 const BASE = '/nails-gretel';
 
 const urlsToCache = [
@@ -61,6 +61,7 @@ const urlsToCache = [
   // Componentes admin
   `${BASE}/components/admin/ConfigPanel.js`,
   `${BASE}/components/admin/EditarNegocio.js`,
+  `${BASE}/components/admin/HorariosExcepcionPanel.js`,
   `${BASE}/components/admin/HorariosPorDiaPanel.js`,
   `${BASE}/components/admin/ProfesionalesPanel.js`,
   `${BASE}/components/admin/ServiciosPanel.js`,

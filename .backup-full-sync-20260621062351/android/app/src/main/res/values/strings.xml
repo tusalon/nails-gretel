@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">Nails Gretel</string>
-    <string name="title_activity_main">Nails Gretel</string>
-    <string name="package_name">com.tusalon.nailsgretel</string>
-    <string name="custom_url_scheme">com.tusalon.nailsgretel</string>
-</resources>
