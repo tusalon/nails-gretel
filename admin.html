@@ -23,22 +23,29 @@
     <script src="utils/timeLogic.js"></script>
     <script src="utils/auth-clients.js?v=20260528-cliente-pais"></script>
     <script src="utils/auth-profesionales.js?v=20260528-internacional"></script>
-    <script src="utils/servicios.js"></script>
+    <script src="utils/offline-panel.js?v=20260626-offline-panel-live"></script>
+    <script>
+        (async function() {
+            const offline = await window.RservasOffline?.redirectIfOffline?.();
+            if (!offline) window.RservasOffline?.syncFromSupabase?.();
+        })();
+    </script>
+    <script src="utils/servicios.js?v=20260626-anticipos-servicio"></script>
     <script src="utils/profesionales.js"></script>
     <script src="utils/config.js"></script>
-    <script src="utils/whatsapp-helper.js?v=20260619-whatsapp-costos"></script>
-    <script src="utils/push-config.js?v=20260601-web-push"></script>
-    <script src="utils/push-notifications.js?v=20260602-oculto"></script>
+    <script src="utils/whatsapp-helper.js?v=20260626-anticipos-servicio"></script>
+    <script src="utils/push-config.js?v=20260621"></script>
+    <script src="utils/push-notifications.js?v=20260621c"></script>
     <script src="utils/native-push-notifications.js?v=20260602-oculto"></script>
 
     <!-- Componentes admin -->
     <script src="components/admin/ConfigPanel.js?v=20260520-indefinido-cobro" type="text/babel"></script>
     <script src="components/admin/ServiciosPanel.js?v=20260530-min-servicio-3" type="text/babel"></script>
     <script src="components/admin/ServiciosPanelPro.js?v=20260530-min-servicio-3" type="text/babel"></script>
-    <script src="components/admin/ServiciosPanelCategorias.js?v=20260530-min-servicio-3" type="text/babel"></script>
+    <script src="components/admin/ServiciosPanelCategorias.js?v=20260626-anticipos-servicio" type="text/babel"></script>
     <script src="components/admin/ProfesionalesPanel.js?v=20260528-banderas" type="text/babel"></script>
     <script src="components/admin/HorariosPorDiaPanel.js?v=20260529-horas-12h" type="text/babel"></script>
-    <script src="admin-app.js?v=20260616-whatsapp-ceros-v2" type="text/babel"></script>
+    <script src="admin-app.js?v=20260626-offline-panel" type="text/babel"></script>
 
     <script>
         (function() {

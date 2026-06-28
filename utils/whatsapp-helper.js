@@ -3,12 +3,21 @@
 
 console.log('📱 whatsapp-helper.js cargado');
 
-const CALENDARIO_PUBLICO_BASE_URL = 'https://tusalon.github.io/exoticnailsbyyuly/';
+function getBaseUrl() {
+    try {
+        // Usa la URL actual del sitio: https://tusalon.github.io/dalila/ etc.
+        const parts = window.location.pathname.split('/').filter(Boolean);
+        const slug = parts[0] || '';
+        return `${window.location.origin}/${slug}/`;
+    } catch {
+        return 'https://tusalon.github.io/exoticnailsbyyuly/';
+    }
+}
 
 function generarLinkCalendarioCliente(booking) {
     if (!booking?.id) return '';
 
-    const calendarUrl = new URL('calendar.html', CALENDARIO_PUBLICO_BASE_URL);
+    const calendarUrl = new URL('calendar.html', getBaseUrl());
 
     calendarUrl.searchParams.set('id', booking.id);
     if (booking.negocio_id) {
@@ -59,6 +68,17 @@ async function getConfigNegocio() {
 async function calcularMontoAnticipo(configNegocio, servicioNombre) {
     if (!configNegocio) return 0;
 
+    if (configNegocio.anticipos_por_servicio && window.salonServicios && window.getAnticipoServicio) {
+        const servicios = await window.salonServicios.getAll(true);
+        const nombres = String(servicioNombre || '').split(' + ').map(nombre => nombre.trim()).filter(Boolean);
+        const serviciosEncontrados = servicios.filter(s => nombres.includes(s.nombre));
+        const total = serviciosEncontrados.reduce((suma, servicio) => {
+            return suma + window.getAnticipoServicio(servicio, configNegocio);
+        }, 0);
+        const moneda = String(configNegocio?.whatsapp_moneda || 'CUP').toUpperCase();
+        return moneda === 'USD' ? Math.round(total * 100) / 100 : Math.round(total);
+    }
+
     if (configNegocio.tipo_anticipo === 'fijo') {
         return configNegocio.valor_anticipo || 0;
     }
@@ -69,19 +89,64 @@ async function calcularMontoAnticipo(configNegocio, servicioNombre) {
         const nombres = String(servicioNombre || '').split(' + ').map(nombre => nombre.trim()).filter(Boolean);
         const serviciosEncontrados = servicios.filter(s => nombres.includes(s.nombre));
         if (serviciosEncontrados.length > 0) {
-            precioServicio = serviciosEncontrados.reduce((total, servicio) => total + (parseFloat(servicio.precio) || 0), 0);
+            precioServicio = serviciosEncontrados.reduce((total, servicio) => {
+                const precio = window.getPrecioServicioBase
+                    ? window.getPrecioServicioBase(servicio)
+                    : (parseFloat(servicio.precio) || 0);
+                return total + precio;
+            }, 0);
         } else {
             const servicio = servicios.find(s => s.nombre === servicioNombre);
-            if (servicio) precioServicio = servicio.precio || 0;
+            if (servicio) {
+                precioServicio = window.getPrecioServicioBase
+                    ? window.getPrecioServicioBase(servicio)
+                    : (parseFloat(servicio.precio) || 0);
+            }
         }
     }
 
     const porcentaje = (configNegocio.valor_anticipo || 0) / 100;
-    return Math.round(precioServicio * porcentaje);
+    const resultado = precioServicio * porcentaje;
+    // Para CUP redondear a entero, para USD preservar 2 decimales
+    const moneda = String(configNegocio?.whatsapp_moneda || 'CUP').toUpperCase();
+    return moneda === 'USD' ? Math.round(resultado * 100) / 100 : Math.round(resultado);
 }
 
 async function calcularTotalReserva(booking) {
     if (!booking) return 0;
+
+    const calcularTotalPorServicios = async () => {
+        let precioServicio = 0;
+        if (window.salonServicios) {
+            const servicios = await window.salonServicios.getAll(true);
+            const nombres = String(booking.servicio || '').split(' + ').map(nombre => nombre.trim()).filter(Boolean);
+            const serviciosEncontrados = servicios.filter(s => nombres.includes(s.nombre));
+
+            if (serviciosEncontrados.length > 0) {
+                precioServicio = serviciosEncontrados.reduce((total, servicio) => {
+                    const precio = window.getPrecioServicioBase
+                        ? window.getPrecioServicioBase(servicio)
+                        : (parseFloat(servicio.precio) || 0);
+                    return total + precio;
+                }, 0);
+            } else {
+                const servicio = servicios.find(s => s.nombre === booking.servicio);
+                if (servicio) {
+                    precioServicio = window.getPrecioServicioBase
+                        ? window.getPrecioServicioBase(servicio)
+                        : (parseFloat(servicio.precio) || 0);
+                }
+            }
+        }
+
+        return precioServicio;
+    };
+
+    const nombresServicio = String(booking.servicio || '').split(' + ').map(nombre => nombre.trim()).filter(Boolean);
+    if (nombresServicio.length > 1) {
+        const totalServicios = await calcularTotalPorServicios();
+        if (totalServicios > 0) return totalServicios;
+    }
 
     const valoresDirectos = [
         booking.total_pagar,
@@ -96,27 +161,16 @@ async function calcularTotalReserva(booking) {
         if (Number.isFinite(numero) && numero > 0) return numero;
     }
 
-    let precioServicio = 0;
-    if (window.salonServicios) {
-        const servicios = await window.salonServicios.getAll(true);
-        const nombres = String(booking.servicio || '').split(' + ').map(nombre => nombre.trim()).filter(Boolean);
-        const serviciosEncontrados = servicios.filter(s => nombres.includes(s.nombre));
-
-        if (serviciosEncontrados.length > 0) {
-            precioServicio = serviciosEncontrados.reduce((total, servicio) => total + (parseFloat(servicio.precio) || 0), 0);
-        } else {
-            const servicio = servicios.find(s => s.nombre === booking.servicio);
-            if (servicio) precioServicio = parseFloat(servicio.precio) || 0;
-        }
-    }
-
-    return precioServicio;
+    return calcularTotalPorServicios();
 }
 
 function formatearMontoReserva(monto, moneda = 'CUP') {
     const numero = parseFloat(monto);
     if (!Number.isFinite(numero) || numero <= 0) return '';
-    const limpio = numero % 1 === 0 ? numero.toFixed(0) : numero.toFixed(2);
+    // USD: siempre 2 decimales (25.00, 12.50). CUP: sin decimales si es entero
+    const limpio = moneda === 'USD'
+        ? numero.toFixed(2)
+        : (numero % 1 === 0 ? numero.toFixed(0) : numero.toFixed(2));
     return `${limpio} ${moneda}`;
 }
 
@@ -307,6 +361,10 @@ window.enviarMensajePago = async function(booking, configNegocio) {
         }
 
         const montoAnticipo = await calcularMontoAnticipo(configNegocio, booking.servicio);
+        if (configNegocio?.anticipos_por_servicio && (!montoAnticipo || montoAnticipo <= 0)) {
+            console.log('ℹ️ La reserva no tiene anticipo configurado por servicio');
+            return false;
+        }
         const totalReserva = await calcularTotalReserva(booking);
         const lineaTotalReserva = generarLineaTotalReserva(totalReserva, configNegocio);
         const totalPagar = formatearMontoWhatsApp(totalReserva, configNegocio);
@@ -395,6 +453,15 @@ ${lineaCalendario}
 ¡Te esperamos! ❤️`;
 
         window.enviarWhatsApp(booking.cliente_whatsapp, mensajeConfirmacion);
+
+        if (window.enviarPushCliente) {
+            window.enviarPushCliente({
+                whatsapp: booking.cliente_whatsapp,
+                title: `💅 Cita agendada — ${configNegocio?.nombre || 'Tu salón'}`,
+                body: `${booking.servicio} el ${getFechaHora(booking).fechaConDia} a las ${getFechaHora(booking).horaFormateada}`,
+            }).catch(() => {});
+        }
+
         return true;
     } catch (error) {
         console.error('Error en enviarConfirmacionReserva:', error);
@@ -440,6 +507,15 @@ Te esperamos ❤️
 Cualquier cambio, podés cancelarlo desde la app con hasta 1 hora de anticipación.`;
 
         window.enviarWhatsApp(booking.cliente_whatsapp, mensajeConfirmacion);
+
+        if (window.enviarPushCliente) {
+            window.enviarPushCliente({
+                whatsapp: booking.cliente_whatsapp,
+                title: `✅ Pago confirmado — ${nombreNegocio}`,
+                body: `Tu turno de ${booking.servicio} el ${fechaConDia} a las ${horaFormateada} está confirmado.`,
+            }).catch(() => {});
+        }
+
         console.log('✅ Mensaje de confirmación de pago enviado');
         return true;
     } catch (error) {
@@ -534,6 +610,15 @@ ${lineaCalendario}
             'default'
         );
 
+        // Push a la clienta: confirmación de su cita
+        if (window.enviarPushCliente) {
+            window.enviarPushCliente({
+                whatsapp: booking.cliente_whatsapp,
+                title: `✅ Cita confirmada — ${config.nombre}`,
+                body: `${booking.servicio} el ${fechaConDia} a las ${horaFormateada}`,
+            }).catch(() => {});
+        }
+
         console.log('✅ Notificaciones de nueva reserva enviadas');
         return true;
     } catch (error) {
@@ -553,6 +638,10 @@ window.notificarReservaPendiente = async function(booking) {
 
         const configNegocio = await window.cargarConfiguracionNegocio();
         const montoAnticipo = await calcularMontoAnticipo(configNegocio, booking.servicio);
+        if (configNegocio?.anticipos_por_servicio && (!montoAnticipo || montoAnticipo <= 0)) {
+            console.log('ℹ️ La reserva no tiene anticipo configurado por servicio');
+            return false;
+        }
         const totalReserva = await calcularTotalReserva(booking);
         const lineaTotalReserva = generarLineaTotalReserva(totalReserva, configNegocio);
         const totalPagar = formatearMontoWhatsApp(totalReserva, configNegocio);
@@ -665,26 +754,30 @@ Hola *${booking.cliente_nombre}*, lamentamos informarte que tu turno ha sido can
         if (canceladoPor === 'cliente') {
             window.enviarWhatsApp(config.telefono, mensajeDuenno);
             console.log('📱 Admin notificado de cancelación por cliente');
+            // Push al admin
+            await window.enviarNotificacionPush(
+                `❌ ${config.nombre} - Cancelación`,
+                `❌ ${booking.cliente_nombre} canceló\n💅 ${booking.servicio}\n📅 ${fechaConDia} ${horaFormateada}`,
+                'x', 'default'
+            );
         } else {
             const telefonoCliente = booking.cliente_whatsapp.replace(/\D/g, '');
             window.enviarWhatsApp(telefonoCliente, mensajeCliente);
             console.log('📱 Cliente notificado de cancelación por admin');
+            // Push al admin y a la clienta
+            await window.enviarNotificacionPush(
+                `❌ ${config.nombre} - Cancelación`,
+                `❌ Cancelado: ${booking.cliente_nombre}\n💅 ${booking.servicio}\n📅 ${fechaConDia} ${horaFormateada}`,
+                'x', 'default'
+            );
+            if (window.enviarPushCliente) {
+                window.enviarPushCliente({
+                    whatsapp: booking.cliente_whatsapp,
+                    title: `❌ Cita cancelada — ${config.nombre}`,
+                    body: `Tu cita de ${booking.servicio} el ${fechaConDia} fue cancelada.`,
+                }).catch(() => {});
+            }
         }
-
-        const mensajePush =
-`❌ CANCELACIÓN - ${config.nombre}
-👤 Cliente: ${booking.cliente_nombre}
-📱 WhatsApp: ${booking.cliente_whatsapp}
-💅 Servicio: ${booking.servicio}
-📅 Fecha: ${fechaConDia}
-${canceladoPor === 'cliente' ? '🔔 Cancelado por cliente' : '🔔 Cancelado por admin'}`;
-
-        await window.enviarNotificacionPush(
-            `❌ ${config.nombre} - Cancelación`,
-            mensajePush,
-            'x',
-            'default'
-        );
 
         console.log('✅ Notificaciones de cancelación enviadas');
         return true;

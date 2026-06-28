@@ -59,6 +59,7 @@ function ServiceSelection({ onSelect, selectedService }) {
     const datosCargadosRef = React.useRef(false);
     const [categoriaActiva, setCategoriaActiva] = React.useState('todos');
     const [serviciosSeleccionados, setServiciosSeleccionados] = React.useState([]);
+    const [busqueda, setBusqueda] = React.useState('');
 
     React.useEffect(() => {
         cargarDatos();
@@ -105,16 +106,25 @@ function ServiceSelection({ onSelect, selectedService }) {
         }
     }, [categoriasVisibles, categoriaActiva]);
 
+    const normalizar = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
     const serviciosFiltrados = React.useMemo(() => {
-        if (categoriaActiva === 'todos') return services;
-        return services.filter(servicio => inferirCategoriaCliente(servicio, categorias) === categoriaActiva);
-    }, [services, categorias, categoriaActiva]);
+        let lista = categoriaActiva === 'todos' ? services : services.filter(s => inferirCategoriaCliente(s, categorias) === categoriaActiva);
+        if (busqueda.trim()) {
+            const q = normalizar(busqueda);
+            lista = lista.filter(s => normalizar(s.nombre).includes(q) || normalizar(s.descripcion).includes(q));
+        }
+        return lista;
+    }, [services, categorias, categoriaActiva, busqueda]);
 
     const totalSeleccion = React.useMemo(() => {
         return serviciosSeleccionados.reduce((total, servicio) => ({
             duracion: total.duracion + (parseInt(servicio.duracion, 10) || 0),
-            precio: total.precio + (parseFloat(servicio.precio) || 0)
-        }), { duracion: 0, precio: 0 });
+            precio: total.precio + (window.getPrecioServicioBase ? window.getPrecioServicioBase(servicio) : (parseFloat(servicio.precio) || 0)),
+            monedas: total.monedas.includes(window.getMonedaServicio ? window.getMonedaServicio(servicio) : 'CUP')
+                ? total.monedas
+                : [...total.monedas, window.getMonedaServicio ? window.getMonedaServicio(servicio) : 'CUP']
+        }), { duracion: 0, precio: 0, monedas: [] });
     }, [serviciosSeleccionados]);
 
     const toggleServicio = (servicio) => {
@@ -147,6 +157,8 @@ function ServiceSelection({ onSelect, selectedService }) {
             nombre: serviciosSeleccionados.map(s => s.nombre).join(' + '),
             duracion: totalSeleccion.duracion,
             precio: totalSeleccion.precio,
+            precio_desde: totalSeleccion.precio,
+            precio_moneda: totalSeleccion.monedas.length === 1 ? totalSeleccion.monedas[0] : 'CUP',
             categoria: 'combos',
             horarios_permitidos: combinarHorariosPermitidos(serviciosSeleccionados)
         });
@@ -182,6 +194,22 @@ function ServiceSelection({ onSelect, selectedService }) {
                 </div>
             ) : (
                 <>
+                    {services.length > 5 && (
+                        <div className="flex items-center border border-pink-200 rounded-xl bg-white/80 focus-within:ring-2 focus-within:ring-pink-400">
+                            <span className="pl-3 text-base flex-shrink-0">🔍</span>
+                            <input
+                                type="text"
+                                value={busqueda}
+                                onChange={e => { setBusqueda(e.target.value); setCategoriaActiva('todos'); }}
+                                placeholder="Buscar servicio..."
+                                className="flex-1 px-3 py-2 bg-transparent text-pink-800 placeholder-pink-300 focus:outline-none text-sm"
+                            />
+                            {busqueda && (
+                                <button onClick={() => setBusqueda('')} className="pr-3 text-pink-400 hover:text-pink-600 text-sm">✕</button>
+                            )}
+                        </div>
+                    )}
+
                     <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
                         {categoriasVisibles.map(categoria => {
                             const id = catId(categoria);
@@ -200,6 +228,12 @@ function ServiceSelection({ onSelect, selectedService }) {
                         })}
                     </div>
 
+                    {busqueda && serviciosFiltrados.length === 0 && (
+                        <div className="text-center py-6 text-pink-400 text-sm">
+                            No hay servicios que coincidan con "{busqueda}"
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-1 gap-3">
                         {serviciosFiltrados.map(service => {
                             const categoria = getCategoriaCliente(service, categorias);
@@ -212,22 +246,22 @@ function ServiceSelection({ onSelect, selectedService }) {
                                         estaSeleccionado ? 'border-pink-500 bg-pink-50 ring-2 ring-pink-300 shadow-md' : 'border-pink-200 bg-white/80 backdrop-blur-sm hover:border-pink-400 hover:bg-pink-50/50 hover:shadow-sm'
                                     }`}
                                 >
-                                    <div className="flex justify-between items-start">
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-2xl">{catIcono(categoria)}</span>
+                                    <div className="space-y-3">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="flex items-start gap-2 min-w-0">
+                                                <span className="text-2xl shrink-0">{catIcono(categoria)}</span>
                                                 <div className="min-w-0">
-                                                    <span className="font-medium text-pink-800 text-lg block">{service.nombre}</span>
+                                                    <span className="font-medium text-pink-800 text-lg block leading-snug break-words">{service.nombre}</span>
                                                     <span className="text-xs text-pink-500">{catNombre(categoria)}</span>
                                                 </div>
                                             </div>
-                                            {service.descripcion && <p className="text-sm text-pink-600/70 mt-1 ml-8">{service.descripcion}</p>}
-                                        </div>
-                                        <div className="flex flex-col items-end gap-1 ml-4 shrink-0">
                                             <span className={`text-xs px-2 py-1 rounded-full border ${estaSeleccionado ? 'bg-pink-600 text-white border-pink-600' : 'bg-white text-pink-600 border-pink-200'}`}>
                                                 {estaSeleccionado ? '✓ Elegido' : 'Agregar'}
                                             </span>
-                                            <span className="text-pink-600 font-bold text-lg">${service.precio}</span>
+                                        </div>
+                                        {service.descripcion && <p className="text-sm text-pink-600/70 ml-8 leading-relaxed break-words">{service.descripcion}</p>}
+                                        <div className="ml-8 flex flex-wrap items-center gap-2">
+                                            <span className="max-w-full text-pink-600 font-bold text-base sm:text-lg leading-tight break-words">{window.formatearPrecioServicio ? window.formatearPrecioServicio(service) : `$${service.precio}`}</span>
                                             <span className="flex items-center text-pink-500 text-xs bg-pink-50 px-2 py-1 rounded-full border border-pink-200">{service.duracion} min</span>
                                         </div>
                                     </div>
@@ -243,7 +277,7 @@ function ServiceSelection({ onSelect, selectedService }) {
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                         <div>
                             <p className="font-bold text-pink-800">
-                                {serviciosSeleccionados.length} servicio{serviciosSeleccionados.length === 1 ? '' : 's'} · {totalSeleccion.duracion} min · ${totalSeleccion.precio}
+                                {serviciosSeleccionados.length} servicio{serviciosSeleccionados.length === 1 ? '' : 's'} · {totalSeleccion.duracion} min · {totalSeleccion.precio % 1 === 0 ? totalSeleccion.precio.toFixed(0) : totalSeleccion.precio.toFixed(2)} {totalSeleccion.monedas.length === 1 ? totalSeleccion.monedas[0] : 'base'}
                             </p>
                             <p className="text-xs text-pink-500 truncate">
                                 {serviciosSeleccionados.map(s => s.nombre).join(' + ')}

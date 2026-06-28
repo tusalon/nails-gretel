@@ -122,8 +122,9 @@ async function getRegistroServiceWorkerPush() {
     return ready || null;
 }
 
-async function guardarSuscripcionPush(subscription, role) {
+async function guardarSuscripcionPush(subscription, role, clienteWhatsapp) {
     const negocioId = getNegocioIdPush();
+    console.log('[Push] guardarSuscripcionPush - negocioId:', negocioId, 'role:', role, 'cliente:', clienteWhatsapp || 'sin whatsapp');
     if (!negocioId) throw new Error('No hay negocio_id para guardar la suscripcion push.');
 
     const payload = {
@@ -136,6 +137,11 @@ async function guardarSuscripcionPush(subscription, role) {
         updated_at: new Date().toISOString()
     };
 
+    if (clienteWhatsapp) payload.cliente_whatsapp = clienteWhatsapp;
+
+    console.log('[Push] endpoint:', subscription.endpoint?.substring(0, 60));
+    console.log('[Push] SUPABASE_URL:', window.SUPABASE_URL);
+
     const response = await fetch(`${window.SUPABASE_URL}/rest/v1/push_suscripciones`, {
         method: 'POST',
         headers: {
@@ -147,11 +153,14 @@ async function guardarSuscripcionPush(subscription, role) {
         body: JSON.stringify(payload)
     });
 
+    console.log('[Push] respuesta HTTP:', response.status);
     if (!response.ok) {
         const errorText = await response.text();
+        console.error('[Push] error guardando:', errorText);
         throw new Error(`No se pudo guardar la suscripcion push: ${errorText}`);
     }
 
+    console.log('[Push] suscripcion guardada OK');
     localStorage.setItem('rservasPushActivo', 'true');
     localStorage.setItem('rservasPushRole', role);
     return true;
@@ -167,41 +176,74 @@ window.pushRservasDisponible = function() {
 };
 
 window.solicitarPushRservasRoma = async function(options = {}) {
-    const role = options.role || getRolPush(options.defaultRole || 'cliente');
+    const role = options.role || options.rol || getRolPush(options.defaultRole || 'cliente');
 
     if (!pushKeyConfigurada()) {
-        alert('Web Push todavia no esta configurado. Falta poner la llave publica VAPID.');
-        return false;
+        console.warn('Push: falta clave VAPID pública');
+        return { ok: false, error: 'vapid_key_missing' };
     }
 
     if (!('Notification' in window) || !('PushManager' in window) || !('serviceWorker' in navigator)) {
-        window.diagnosticarPushRservasRoma();
-        return false;
+        console.warn('Push: navegador no compatible');
+        return { ok: false, error: 'not_supported' };
     }
 
     const permission = options.permission || await pedirPermisoNotificacionesPush();
     if (permission !== 'granted') {
-        window.diagnosticarPushRservasRoma();
-        return false;
+        console.warn('Push: permiso no concedido:', permission);
+        return { ok: false, error: 'permission_' + permission };
     }
 
     const registration = await getRegistroServiceWorkerPush();
     if (!registration) {
-        alert('No se encontro el Service Worker para activar notificaciones.');
+        console.warn('Push: Service Worker no disponible');
+        return { ok: false, error: 'sw_not_ready' };
+    }
+
+    try {
+        console.log('[Push] VAPID key:', window.RSERVAS_PUSH_PUBLIC_KEY?.substring(0, 20));
+        let subscription = await registration.pushManager.getSubscription();
+        console.log('[Push] suscripcion existente:', subscription ? 'SI' : 'NO');
+        if (!subscription) {
+            console.log('[Push] creando nueva suscripcion...');
+            subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(window.RSERVAS_PUSH_PUBLIC_KEY)
+            });
+            console.log('[Push] suscripcion creada:', subscription.endpoint?.substring(0, 60));
+        }
+        await guardarSuscripcionPush(subscription.toJSON ? subscription.toJSON() : subscription, role, options.clienteWhatsapp);
+        return { ok: true };
+    } catch (err) {
+        console.error('[Push] error:', err.name, err.message);
+        return { ok: false, error: err.message };
+    }
+};
+
+// Envía push a una clienta específica por su whatsapp en este negocio
+window.enviarPushCliente = async function({ whatsapp, title, body, url = '' } = {}) {
+    try {
+        if (!whatsapp || !title) return false;
+        const negocioId = getNegocioIdPush();
+        if (!negocioId || !window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) return false;
+
+        const response = await fetch(`${window.SUPABASE_URL}/functions/v1/${window.RSERVAS_PUSH_FUNCTION}`, {
+            method: 'POST',
+            headers: {
+                apikey: window.SUPABASE_ANON_KEY,
+                Authorization: `Bearer ${window.SUPABASE_ANON_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ negocio_id: negocioId, cliente_whatsapp: whatsapp, title, body, url })
+        });
+
+        const result = await response.json().catch(() => ({}));
+        if (result?.sent > 0) console.log(`[Push cliente] Enviado a ${whatsapp}`);
+        return result?.sent > 0;
+    } catch (err) {
+        console.warn('[Push cliente] Error:', err.message);
         return false;
     }
-
-    let subscription = await registration.pushManager.getSubscription();
-    if (!subscription) {
-        subscription = await registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(window.RSERVAS_PUSH_PUBLIC_KEY)
-        });
-    }
-
-    await guardarSuscripcionPush(subscription.toJSON ? subscription.toJSON() : subscription, role);
-    alert('Notificaciones push activadas para este dispositivo.');
-    return true;
 };
 
 window.enviarWebPushRservasRoma = async function({ title, body, url = '', role = 'admin', tags = 'bell', data = {} } = {}) {
@@ -242,7 +284,6 @@ window.enviarWebPushRservasRoma = async function({ title, body, url = '', role =
 };
 
 function instalarBotonPushAdmin() {
-    return;
     if (document.getElementById('rservas-push-button')) return;
     if (!pushKeyConfigurada()) return;
     if (!('Notification' in window) || Notification.permission === 'granted') return;
